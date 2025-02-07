@@ -4,8 +4,9 @@ from PIL import Image
 from pathlib import Path
 from sklearn.model_selection import train_test_split
 from torchvision.datasets.vision import VisionDataset
-
-
+from matplotlib import pyplot as plt
+import torch
+from torchvision.transforms.functional import to_pil_image
 
 class WildfireDataset(VisionDataset):
     
@@ -29,6 +30,40 @@ class WildfireDataset(VisionDataset):
 
         return X, target
     
+    def __showitem__(self, index: int):
+
+        image_tensor, label = self.__getitem__(index)
+
+        # Convert it back to a PIL Image if necessary.
+        if isinstance(image_tensor, torch.Tensor):
+            image = to_pil_image(image_tensor)
+        else:
+            image = image_tensor
+
+        # Display the image
+        plt.imshow(image)
+        plt.title(f"Label: {label}")
+        plt.axis("off")
+        plt.show()
+    
+    def __showitems__(self, indices: list):
+        plt.figure(figsize=(12, 12))
+        for i, index in enumerate(indices, start=1):
+            image_tensor, label = self.__getitem__(index)
+            
+            # Convert the tensor back to a PIL Image if necessary.
+            if isinstance(image_tensor, torch.Tensor):
+                image = to_pil_image(image_tensor)
+            else:
+                image = image_tensor
+
+            # Plot each image
+            plt.subplot(1, len(indices), i)
+            plt.imshow(image)
+            plt.title(f"Label: {label}")
+            plt.axis("off")
+        plt.show()
+        
     def __len__(self):
         return len(self.filenames)
 

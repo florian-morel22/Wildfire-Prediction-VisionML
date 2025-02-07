@@ -32,7 +32,7 @@ class BasicCNN():
     ) -> None:
         
         print(">>> TRAIN")
-
+        
         for epoch in range(nb_epochs):
 
             running_loss = 0.0
