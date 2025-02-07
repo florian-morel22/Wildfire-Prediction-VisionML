@@ -1,0 +1,6 @@
+ipykernel
+torch==2.6.0
+pandas==2.2.3
+scikit-learn==1.6.1
+torchvision==0.21.0
+tqdm==4.67.1
