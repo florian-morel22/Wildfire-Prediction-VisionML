@@ -32,7 +32,7 @@ class BasicCNN():
     ) -> None:
         
         print(">>> TRAIN")
-
+        
         for epoch in range(nb_epochs):
 
             running_loss = 0.0
@@ -62,6 +62,7 @@ class BasicCNN():
         total = 0
 
         print(">>> TEST")
+        print("TODO: Voir autres scores")
         
         with torch.no_grad():
             for data in tqdm(testloader, total=len(testloader)):
