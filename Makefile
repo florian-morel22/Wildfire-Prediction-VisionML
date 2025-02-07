@@ -1,6 +1,7 @@
 
 
 PART=ENSTA-l40s #ENSTA-h100
+TIME=00:30:00
 
 setup: download_dataset
 
@@ -20,4 +21,4 @@ download_dataset:
 	rm ./data/wildfire-prediction-dataset.zip
 	
 run:
-	srun --pty --time=00:30:00 --partition=$(PART) --gpus=1 python main.py
+	srun --pty --time=$(TIME) --partition=$(PART) --gpus=1 python main.py
