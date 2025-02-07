@@ -62,6 +62,7 @@ class BasicCNN():
         total = 0
 
         print(">>> TEST")
+        print("TODO: Voir autres scores")
         
         with torch.no_grad():
             for data in tqdm(testloader, total=len(testloader)):
