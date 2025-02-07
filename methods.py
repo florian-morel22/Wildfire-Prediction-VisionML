@@ -70,7 +70,7 @@ class BasicCNN():
 
                 outputs = self.network(images)
 
-                predicted = (torch.sigmoid(outputs) > 0.5).float()
+                predicted = (torch.sigmoid(outputs) > 0.5).to(torch.float32)
                 labels = labels.view_as(predicted)
 
                 total += labels.size(0)
