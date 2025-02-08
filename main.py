@@ -32,19 +32,8 @@ def main():
     train_dataset = WildfireDataset(train, transform)
     test_dataset = WildfireDataset(test, transform)
 
-    trainloader = DataLoader(
-        train_dataset,
-        batch_size=batchsize,
-        shuffle=True,
-        num_workers=4
-    )
-
-    testloader = DataLoader(
-        test_dataset,
-        batch_size=batchsize,
-        shuffle=False,
-        num_workers=4
-    )
+    trainloader: DataLoader = train_dataset.__dataloader__(batchsize, num_workers=4)
+    testloader: DataLoader = test_dataset.__dataloader__(batchsize, num_workers=4)
 
     ####### METHOD #######
 

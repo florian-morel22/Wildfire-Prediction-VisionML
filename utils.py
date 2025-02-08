@@ -7,6 +7,8 @@ from torchvision.datasets.vision import VisionDataset
 from matplotlib import pyplot as plt
 import torch
 from torchvision.transforms.functional import to_pil_image
+from torch.utils.data import DataLoader
+from torchvision.transforms import v2
 
 class WildfireDataset(VisionDataset):
     
@@ -14,7 +16,6 @@ class WildfireDataset(VisionDataset):
         self.filenames = dataframe["file"].reset_index(drop=True)
         self.labels = dataframe["label"].reset_index(drop=True)
         self.transform = transform
-        
 
     def __getitem__(self, index: int):
         img_path = self.filenames[index]
@@ -28,13 +29,25 @@ class WildfireDataset(VisionDataset):
         if self.transform:
             X = self.transform(X)
 
-        return X, target
+        return {"pixel_values": X, "labels": target}
     
-    def __showitem__(self, index: int):
+    def __showitem__(self, index: int, mean=None, std=None):
 
-        image_tensor, label = self.__getitem__(index)
+        dict_ = self.__getitem__(index)
+        image_tensor, label = dict_['pixel_values'], dict_['labels']
 
-        # Convert it back to a PIL Image if necessary.
+        # If normalization parameters are provided, create a denormalization transform
+        if mean and std:
+            denormalize = v2.Normalize(
+                mean=[-m / s for m, s in zip(mean, std)],
+                std=[1 / s for s in std]
+            )
+
+        # Denormalize if needed
+        if mean and std:
+            image_tensor = denormalize(image_tensor)
+
+        # Convert the tensor back to a PIL image
         if isinstance(image_tensor, torch.Tensor):
             image = to_pil_image(image_tensor)
         else:
@@ -46,26 +59,44 @@ class WildfireDataset(VisionDataset):
         plt.axis("off")
         plt.show()
     
-    def __showitems__(self, indices: list):
+    def __showitems__(self, indices: list, mean=None, std=None):
         plt.figure(figsize=(12, 12))
+
+        # If normalization parameters are provided, create a denormalization transform
+        if mean and std:
+            denormalize = v2.Normalize(
+                mean=[-m / s for m, s in zip(mean, std)],
+                std=[1 / s for s in std]
+            )
+
         for i, index in enumerate(indices, start=1):
-            image_tensor, label = self.__getitem__(index)
-            
-            # Convert the tensor back to a PIL Image if necessary.
+            dict_ = self.__getitem__(index)
+            image_tensor, label = dict_['pixel_values'], dict_['labels']
+
+            # Denormalize if needed
+            if mean and std:
+                image_tensor = denormalize(image_tensor)
+
+            # Convert the tensor back to a PIL image
             if isinstance(image_tensor, torch.Tensor):
                 image = to_pil_image(image_tensor)
             else:
                 image = image_tensor
 
-            # Plot each image
+            # Plot the image
             plt.subplot(1, len(indices), i)
             plt.imshow(image)
             plt.title(f"Label: {label}")
             plt.axis("off")
         plt.show()
+
         
     def __len__(self):
         return len(self.filenames)
+    
+    def __dataloader__(self, batchsize=10, num_workers=4) -> DataLoader:
+        return DataLoader(self, batch_size=batchsize, shuffle=True, num_workers=num_workers)
+
 
 
 def split_val_dataset(data_folder: Path) -> tuple[pd.DataFrame, pd.DataFrame]:
