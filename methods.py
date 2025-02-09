@@ -82,3 +82,5 @@ class BasicCNN():
     def save(self):
         """save the model, the loss plot..."""
         pass
+
+

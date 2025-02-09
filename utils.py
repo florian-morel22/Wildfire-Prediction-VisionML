@@ -29,6 +29,10 @@ class WildfireDataset(VisionDataset):
         if self.transform:
             X = self.transform(X)
 
+        # Ensure compatibile with mps
+        X = X.to(torch.float32) 
+        target = torch.tensor(target, dtype=torch.int32)
+
         return {"pixel_values": X, "labels": target}
     
     def __showitem__(self, index: int, mean=None, std=None):
