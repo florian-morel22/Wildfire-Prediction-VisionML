@@ -10,6 +10,7 @@ from models import Net
 # ViT
 from transformers import ViTFeatureExtractor, ViTForImageClassification, TrainingArguments, Trainer
 from utils import compute_metrics
+from datasets import DatasetDict
     
 class BasicCNN():
 
@@ -113,6 +114,7 @@ class ViT():
             ):
 
         self.device = device
+        print(device)
         self.feature_extractor = ViTFeatureExtractor.from_pretrained(model_name)
 
         self.model = ViTForImageClassification.from_pretrained(
@@ -159,16 +161,13 @@ class ViT():
             report_to=None,
             load_best_model_at_end=True
             )
-        
-        trainloader: DataLoader = train_dataset.__dataloader__(batchsize=16, num_workers=4)
-        testloader: DataLoader = test_dataset.__dataloader__(batchsize=16, num_workers=4)
 
         trainer = Trainer(
             model=self.model,
             args=training_args,
             compute_metrics=compute_metrics,
-            train_dataset=trainloader,
-            eval_dataset=testloader,
+            train_dataset=train_dataset,
+            eval_dataset=test_dataset,
             tokenizer=self.feature_extractor
         )
 
