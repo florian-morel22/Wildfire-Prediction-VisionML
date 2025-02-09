@@ -270,21 +270,31 @@ class ViTUnsupervised():
         embedding = outputs.last_hidden_state[:, 0, :].squeeze(0).cpu().numpy()
         return embedding
 
+
     def extract_embeddings_from_folder(self, folder_path: str) -> np.ndarray:
         """
-        Extract embeddings for all images in a folder.
-        :param folder_path: Path to the folder containing image files.
+        Extract embeddings for all images in a folder, including subfolders.
+        :param folder_path: Path to the parent folder containing subfolders ('nowildfire', 'wildfire').
         :return: A matrix of embeddings for all images.
         """
         embeddings = []
-        image_paths = [os.path.join(folder_path, img) for img in os.listdir(folder_path) if img.endswith(('png', 'jpg', 'jpeg'))]
+        # List subfolders (nowildfire and wildfire) inside the parent folder
+        subfolders = ['nowildfire', 'wildfire']
         
-        for image_path in image_paths:
-            print(f"Processing {image_path}")
-            embedding = self.extract_embedding(image_path)
-            embeddings.append(embedding)
+        for subfolder in subfolders:
+            subfolder_path = os.path.join(folder_path, subfolder)
+            
+            # List all image paths in the current subfolder
+            image_paths = [os.path.join(subfolder_path, img) for img in os.listdir(subfolder_path) 
+                        if img.endswith(('png', 'jpg', 'jpeg'))]
+            
+            # Extract embeddings for each image
+            for image_path in tqdm(image_paths, desc="Process images"):
+                embedding = self.extract_embedding(image_path)  # Assuming you have the extract_embedding function
+                embeddings.append(embedding)
         
         return np.array(embeddings)
+
 
     def cluster_embeddings(self, embeddings: np.ndarray, method: str = "kmeans", **kwargs):
         """
