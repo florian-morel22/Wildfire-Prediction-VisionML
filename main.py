@@ -47,8 +47,14 @@ def main():
     test_dataset = WildfireDataset(test, transform)
 
     ####### METHOD #######
-
-    method.train_and_test(train_dataset, test_dataset, nb_epochs=50, batch_size=50, learning_rate=1e-2)
+    import random
+    from torch.utils.data import Subset
+    fraction = 0.02
+    train_indices = random.sample(range(len(train_dataset)), int(len(train_dataset)*fraction))
+    test_indices = random.sample(range(len(test_dataset)), int(len(test_dataset)*fraction))
+    train_subset = Subset(train_dataset, train_indices)
+    test_subset = Subset(test_dataset, test_indices)
+    method.train_and_test(train_subset, test_subset, nb_epochs=50, batch_size=50, learning_rate=1e-2)
     method.save()
 
 

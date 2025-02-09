@@ -8,10 +8,17 @@ from torch.utils.data import DataLoader
 from models import Net
 
 # ViT
-from transformers import ViTFeatureExtractor, ViTForImageClassification, TrainingArguments, Trainer
+from transformers import ViTFeatureExtractor, ViTModel, ViTForImageClassification, TrainingArguments, Trainer
 from utils import compute_metrics
 from datasets import DatasetDict
-    
+import os
+from transformers import AutoModelForImageClassification, AutoFeatureExtractor
+from PIL import Image
+
+# ViT unsupervised: get embeddings
+import numpy as np
+from sklearn.cluster import KMeans, DBSCAN
+
 class BasicCNN():
 
     def __init__(
@@ -139,11 +146,11 @@ class ViT():
 
         # default: adamW optimizer
         training_args = TrainingArguments(
-            use_mps_device=True,
+            # use_mps_device=True,
             output_dir="./vit-fire-detection",
             per_device_train_batch_size=batch_size,
             per_device_eval_batch_size=batch_size,
-            evaluation_strategy="epoch",
+            eval_strategy="epoch",
             save_strategy="epoch",
             logging_steps=50,
             num_train_epochs=nb_epochs,
@@ -168,7 +175,7 @@ class ViT():
             compute_metrics=compute_metrics,
             train_dataset=train_dataset,
             eval_dataset=test_dataset,
-            tokenizer=self.feature_extractor
+            processing_class=self.feature_extractor
         )
 
         try:
@@ -176,3 +183,132 @@ class ViT():
             trainer.train()
         except Exception as e:
             print(f"Exception. {e}")
+
+    def save(self, save_path: str = "./vit-fire-detection"):
+        """save the model, the loss plot..."""
+        print(">>> SAVING MODEL")
+
+        os.makedirs(save_path, exist_ok=True)
+        try:
+            self.model.save_pretrained(save_path)
+            self.feature_extractor.save_pretrained(save_path)
+        except Exception as e:
+            print(f"Error while saving the model: {e}")
+
+    def load_model(self, save_path: str = None):
+        """
+        Load the vit model for inference
+        """
+
+        self.model = AutoModelForImageClassification.from_pretrained(save_path)
+        self.feature_extractor = AutoFeatureExtractor.from_pretrained(save_path)$
+
+    def infer(self, image_path: str, model_path: str = "./vit-fire-detection"):
+        """
+        Perform inference using a saved ViT model.
+        :param image_path: Path to the image to infer.
+        :param model_path: Path where the model and feature extractor are saved.
+        :return: Predicted label and probabilities.
+        """
+        
+        # Open and preprocess the image
+        image = Image.open(image_path).convert("RGB")
+        inputs = self.feature_extractor(images=image, return_tensors="pt")
+        
+        # Perform inference
+        self.model.eval()  # Set the model to evaluation mode
+        with torch.no_grad():
+            outputs = self.model(**inputs)
+        
+        # Get the predicted class and probabilities
+        logits = outputs.logits
+        probs = torch.softmax(logits, dim=-1)
+        predicted_class = probs.argmax(dim=-1).item()
+        
+        return {
+            "predicted_class": predicted_class,
+            "probabilities": probs.tolist()[0]
+        }
+       
+
+class ViTUnsupervised():
+
+    def __init__(
+            self,
+            model_name: str = "google/vit-base-patch16-224-in21k",
+            device: str = "cpu",
+            ):
+        """
+        Initialize the ViT class for unsupervised tasks.
+        The model extracts embeddings instead of performing classification.
+        """
+        self.device = device
+        print(f"Using device: {device}")
+        
+        # Load the feature extractor and the base ViT model (without classification head)
+        self.feature_extractor = ViTFeatureExtractor.from_pretrained(model_name)
+        self.model = ViTModel.from_pretrained(model_name)  # Base ViT model
+        self.model.to(device)
+
+    def extract_embedding(self, image_path: str) -> np.ndarray:
+        """
+        Extract the embedding for a single image using the pre-trained ViT model.
+        :param image_path: Path to the image file.
+        :return: The image embedding as a numpy array.
+        """
+        # Open and preprocess the image
+        image = Image.open(image_path).convert("RGB")
+        inputs = self.feature_extractor(images=image, return_tensors="pt")
+        inputs = {k: v.to(self.device) for k, v in inputs.items()}
+        
+        # Pass the image through the model to get embeddings
+        self.model.eval()
+        with torch.no_grad():
+            outputs = self.model(**inputs)
+        
+        # Extract the embedding from the [CLS] token
+        embedding = outputs.last_hidden_state[:, 0, :].squeeze(0).cpu().numpy()
+        return embedding
+
+    def extract_embeddings_from_folder(self, folder_path: str) -> np.ndarray:
+        """
+        Extract embeddings for all images in a folder.
+        :param folder_path: Path to the folder containing image files.
+        :return: A matrix of embeddings for all images.
+        """
+        embeddings = []
+        image_paths = [os.path.join(folder_path, img) for img in os.listdir(folder_path) if img.endswith(('png', 'jpg', 'jpeg'))]
+        
+        for image_path in image_paths:
+            print(f"Processing {image_path}")
+            embedding = self.extract_embedding(image_path)
+            embeddings.append(embedding)
+        
+        return np.array(embeddings)
+
+    def cluster_embeddings(self, embeddings: np.ndarray, method: str = "kmeans", **kwargs):
+        """
+        Apply a clustering algorithm to the extracted embeddings.
+        :param embeddings: Matrix of embeddings (numpy array).
+        :param method: Clustering method ('kmeans' or 'dbscan').
+        :param kwargs: Additional parameters for the clustering algorithm (e.g., n_clusters for K-Means).
+        :return: Cluster labels for the embeddings.
+        """
+        if method == "kmeans":
+            n_clusters = kwargs.get("n_clusters", 2)
+            print(f"Clustering with K-Means (n_clusters={n_clusters})")
+            kmeans = KMeans(n_clusters=n_clusters, random_state=42)
+            labels = kmeans.fit_predict(embeddings)
+        
+        elif method == "dbscan":
+            eps = kwargs.get("eps", 0.5)
+            min_samples = kwargs.get("min_samples", 5)
+            print(f"Clustering with DBSCAN (eps={eps}, min_samples={min_samples})")
+            dbscan = DBSCAN(eps=eps, min_samples=min_samples)
+            labels = dbscan.fit_predict(embeddings)
+        
+        else:
+            raise ValueError("Invalid clustering method. Choose 'kmeans' or 'dbscan'.")
+        
+        return labels
+  
