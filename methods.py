@@ -171,5 +171,8 @@ class ViT():
             tokenizer=self.feature_extractor
         )
 
+        try:
         # Train the model
-        trainer.train()
+            trainer.train()
+        except Exception as e:
+            print(f"Exception. {e}")

@@ -1,3 +1,6 @@
 .env
 .jpg
 data
+**/images/*
+vit-fire-detection/
+__pycache__/
