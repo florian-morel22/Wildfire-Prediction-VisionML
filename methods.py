@@ -7,6 +7,9 @@ from torch.utils.data import DataLoader
 
 from models import Net
 
+# ViT
+from transformers import ViTFeatureExtractor, ViTForImageClassification, TrainingArguments, Trainer
+from utils import compute_metrics
     
 class BasicCNN():
 
@@ -27,10 +30,13 @@ class BasicCNN():
 
     def train(
             self,
-            trainloader: DataLoader,
+            train_dataset,
             nb_epochs: int,
+            batch_size=50
     ) -> None:
         
+        trainloader: DataLoader = train_dataset.__dataloader__(batch_size, num_workers=4)
+
         print(">>> TRAIN")
         
         for epoch in range(nb_epochs):
@@ -56,13 +62,15 @@ class BasicCNN():
 
     def test(
             self,
-            testloader: DataLoader
+            test_dataset: DataLoader,
+            batch_size: int = 50
     ) -> None:
         correct = 0
         total = 0
 
         print(">>> TEST")
         print("TODO: Voir autres scores")
+        testloader: DataLoader = test_dataset.__dataloader__(batch_size, num_workers=4)
         
         with torch.no_grad():
             for data in tqdm(testloader, total=len(testloader)):
@@ -79,8 +87,95 @@ class BasicCNN():
 
         print(f'Accuracy of the network : {100 * correct / total} %')
 
+    def train_and_test(
+            self,
+            train_dataset,
+            test_dataset,
+            nb_epochs: int = 7,
+            batch_size: int = 50,
+            learning_rate: float = 1e-2
+        ) -> None:
+
+        self.train(train_dataset, nb_epochs=nb_epochs, batch_size=batch_size)
+        self.test(test_dataset, batch_size=batch_size)
+            
     def save(self):
         """save the model, the loss plot..."""
         pass
 
 
+class ViT():
+
+    def __init__(
+            self,
+            model_name: str = "google/vit-base-patch16-224-in21k",
+            device: str = "cpu",
+            ):
+
+        self.device = device
+        self.feature_extractor = ViTFeatureExtractor.from_pretrained(model_name)
+
+        self.model = ViTForImageClassification.from_pretrained(
+            model_name, 
+            num_labels = 2, 
+            id2label = {0:'Normal', 1:'Fire'}, 
+            label2id = {'Normal':0, 'Fire':1}
+            )
+        self.model.to(device)
+
+        
+        self.optimizer = optim.SGD(self.network.parameters(), lr=0.01, momentum=0.9)
+        self.criterion = nn.BCEWithLogitsLoss()
+
+
+
+    def train_and_test(
+            self,
+            train_dataset,
+            test_dataset,
+            nb_epochs: int,
+            batch_size: int = 50,
+            learning_rate: float = 1e-2
+        ) -> None:
+        
+        print(">>> TRAIN")
+
+        # default: adamW optimizer
+        training_args = TrainingArguments(
+            use_mps_device=True,
+            output_dir="./vit-fire-detection",
+            per_device_train_batch_size=batch_size,
+            per_device_eval_batch_size=batch_size,
+            evaluation_strategy="epoch",
+            save_strategy="epoch",
+            logging_steps=50,
+            num_train_epochs=nb_epochs,
+
+            learning_rate=learning_rate,
+            weight_decay=0.01,
+            adam_beta1=0.9,
+            adam_beta2=0.999,
+            adam_epsilon=1e-8,
+            warmup_steps=100,
+
+            save_total_limit=1,
+            remove_unused_columns=False,
+            push_to_hub=False,
+            report_to=None,
+            load_best_model_at_end=True
+            )
+        
+        trainloader: DataLoader = train_dataset.__dataloader__(batchsize=16, num_workers=4)
+        testloader: DataLoader = test_dataset.__dataloader__(batchsize=16, num_workers=4)
+
+        trainer = Trainer(
+            model=self.model,
+            args=training_args,
+            compute_metrics=compute_metrics,
+            train_dataset=trainloader,
+            eval_dataset=testloader,
+            tokenizer=self.feature_extractor
+        )
+
+        # Train the model
+        trainer.train()

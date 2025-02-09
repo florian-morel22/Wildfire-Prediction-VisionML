@@ -4,38 +4,51 @@ from pathlib import Path
 from torchvision.transforms import v2
 from torch.utils.data import DataLoader
 
-from methods import BasicCNN
+from methods import BasicCNN, ViT
 from utils import WildfireDataset
 from utils import split_val_dataset
 
 
 def main():
+    method_name = "basic_cnn"
 
     # variables #
     batchsize = 10
     data_folder = Path("./data/valid")
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    method = BasicCNN(device=device)
+    device = torch.device('cuda' if torch.cuda.is_available() else 'mps' if torch.mps.is_available() else 'cpu')
+
+    if method_name == "basic_cnn":
+        method = BasicCNN(device=device)
+
+        transform = v2.Compose([
+            v2.ToImage(), # Convert into Image tensor
+            v2.ToDtype(torch.float32, scale=True)
+        ])
+
+    elif method_name == "vit":
+        method = ViT(device=device)
+
+        feature_extractor_ = method.feature_extractor
+        transform = v2.Compose([
+            v2.ToImage(),
+            v2.ToDtype(torch.float32, scale=True),  # Scale pixel values to [0, 1]
+            v2.Resize((224, 224)),  # Resize images to 224x224
+            v2.Normalize(
+                mean=torch.tensor(feature_extractor_.image_mean, dtype=torch.float32).tolist(),
+                std=torch.tensor(feature_extractor_.image_std, dtype=torch.float32).tolist()
+            ),  # Normalize with float32
+        ])
     #############
 
 
     train, test = split_val_dataset(data_folder)
 
-    transform = v2.Compose([
-        v2.ToImage(), # Convert into Image tensor
-        v2.ToDtype(torch.float32, scale=True)
-    ])
-
     train_dataset = WildfireDataset(train, transform)
     test_dataset = WildfireDataset(test, transform)
 
-    trainloader: DataLoader = train_dataset.__dataloader__(batchsize, num_workers=4)
-    testloader: DataLoader = test_dataset.__dataloader__(batchsize, num_workers=4)
-
     ####### METHOD #######
 
-    method.train(trainloader, nb_epochs=7)
-    method.test(testloader)
+    method.train_and_test(train_dataset, test_dataset, nb_epochs=50, batch_size=50, learning_rate=1e-2)
     method.save()
 
 

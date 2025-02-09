@@ -125,3 +125,10 @@ def split_val_dataset(data_folder: Path) -> tuple[pd.DataFrame, pd.DataFrame]:
     train, valid = train_test_split(fulldataset, train_size=0.8, random_state=42, shuffle=True)
 
     return train, valid
+
+def compute_metrics(pred):
+    from sklearn.metrics import accuracy_score
+    labels = pred.label_ids
+    preds = pred.predictions.argmax(-1)
+    acc = accuracy_score(labels, preds)
+    return {"accuracy": acc}
