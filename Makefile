@@ -1,7 +1,7 @@
 
 
 PART=ENSTA-l40s #ENSTA-h100
-TIME=00:30:00
+TIME=04:00:00
 
 setup: download_dataset
 

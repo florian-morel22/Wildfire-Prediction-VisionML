@@ -10,7 +10,7 @@ from utils import split_val_dataset
 
 
 def main():
-    method_name = "basic_cnn"
+    method_name = "vit"
 
     # variables #
     batchsize = 10

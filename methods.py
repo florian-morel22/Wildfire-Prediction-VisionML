@@ -123,11 +123,6 @@ class ViT():
             )
         self.model.to(device)
 
-        
-        self.optimizer = optim.SGD(self.network.parameters(), lr=0.01, momentum=0.9)
-        self.criterion = nn.BCEWithLogitsLoss()
-
-
 
     def train_and_test(
             self,
