@@ -201,7 +201,7 @@ class ViT():
         """
 
         self.model = AutoModelForImageClassification.from_pretrained(save_path)
-        self.feature_extractor = AutoFeatureExtractor.from_pretrained(save_path)$
+        self.feature_extractor = AutoFeatureExtractor.from_pretrained(save_path)
 
     def infer(self, image_path: str, model_path: str = "./vit-fire-detection"):
         """
