@@ -93,7 +93,7 @@ class ViTEncoder(ImageEncoder):
             img, label = data
             embedding = self.encode_image(img)
             embeddings.append(embedding)
-            labels.append(label.item())
+            labels.append(label)
 
         return np.array(embeddings), np.array(labels)
   
