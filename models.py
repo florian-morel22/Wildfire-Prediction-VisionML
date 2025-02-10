@@ -6,7 +6,9 @@ import torch.nn.functional as F
 from PIL import Image
 from tqdm import tqdm
 from abc import abstractmethod
-from torch.utils.data import Dataset
+import torchvision.transforms as transforms
+from torch.utils.data import Dataset 
+from torchvision.models import resnet50, ResNet50_Weights
 from transformers import ViTImageProcessor, ViTModel
 from transformers import SegformerForSemanticSegmentation, SegformerImageProcessor
 
@@ -132,3 +134,57 @@ class SegFormerEncoder(ImageEncoder):
         return encoded_image
 
 
+
+  
+class ResNetEncoder:
+    def __init__(self, model_name="resnet50", device="cpu"):
+        """
+        Initialize ResNet for unsupervised tasks.
+        The model extracts embeddings instead of performing classification.
+        """
+        self.device = device
+        print(f"Using device: {device}")
+
+        # Charger ResNet50 sans la dernière couche (FC layer)
+        self.model = resnet50(weights=ResNet50_Weights.DEFAULT)
+        self.model.fc = nn.Identity()  # Remplace la dernière couche FC par une identité
+        self.model.to(device)
+        self.model.eval()
+
+        # Transformations nécessaires pour ResNet
+        self.transform = transforms.Compose([
+            transforms.Resize((224, 224)),
+            transforms.ToTensor(),
+            transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+        ])
+
+    def encode_image(self, image: Image.Image) -> np.ndarray:
+        """
+        Extract the embedding for a single image using the pre-trained ResNet model.
+        :param image: image file.
+        :return: The image embedding as a numpy array.
+        """
+        # Appliquer les transformations
+        image = self.transform(image).unsqueeze(0).to(self.device)
+
+        # Extraire les features avec ResNet
+        with torch.no_grad():
+            embedding = self.model(image)
+
+        return embedding.squeeze(0).cpu().numpy()  # Convertir en numpy
+
+    def encode_images(self, dataset: Dataset) -> tuple[np.ndarray, np.ndarray]:
+        """
+        Extract embeddings for all images in a dataset.
+        :param dataset: dataset containing images.
+        :return: A matrix of embeddings for all images.
+        """
+        embeddings = []
+        labels = []
+        for data in tqdm(dataset, desc="Processing images"):
+            img, label = data
+            embedding = self.encode_image(img)
+            embeddings.append(embedding)
+            labels.append(label.item())
+
+        return np.array(embeddings), np.array(labels)  

@@ -389,7 +389,7 @@ class BasicClustering():
         
         labels_kmeans = self.clustering_model.fit_predict(encoded_images)
 
-        print(f"labels kmean: {labels_kmeans}")
+        print(f"labels kmean: {labels_kmeans}") 
 
         accuracy = sum(labels_true==labels_kmeans)/len(labels_true)
 

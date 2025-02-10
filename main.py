@@ -3,8 +3,8 @@ import argparse
 
 from pathlib import Path
 
-from utils import load_data
-from models import ViTEncoder, SegFormerEncoder
+from utils import load_data 
+from models import ViTEncoder, ResNetEncoder, SegFormerEncoder
 from methods import Method, BasicCNN, ViT, BasicClustering, AdvancedClustering
 
 
@@ -34,6 +34,18 @@ def main(args):
         )
 
         sessions.append(("clustering_vit", method))
+        
+    if method_name == "clustering_resnet" or method_name == "all":
+        encoder = ResNetEncoder(device=device)
+        method = BasicClustering(
+            encoder=encoder,
+            device=device,
+            method=args.clustering_algo, 
+            nb_cluster=args.nb_clusters
+        )
+
+        transform = None
+        sessions.append(("clustering_resnet", method))
     
     if method_name == "advanced_clustering" or method_name == "all":
         encoder = ViTEncoder(device=device)
@@ -58,6 +70,7 @@ def main(args):
         sessions.append(("advanced_clustering1", method))
 
     train_df, valid_df, test_df = load_data(data_path, args.DEBUG, num_samples=num_samples)
+    
     
     for session in sessions:
 
