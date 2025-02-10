@@ -243,6 +243,10 @@ class ViT():
         self.val_dataset = WildfireDataset(val, transform, target_transform, "vit")
         self.test_dataset = WildfireDataset(test_df, transform, target_transform, "vit")
 
+        print(f">> train dataset : {len(self.train_dataset)} rows.")
+        print(f">> validation dataset : {len(self.val_dataset)} rows.")
+        print(f">> test dataset : {len(self.test_dataset)} rows.")
+
     def run(self, debug: bool=False) -> None:
         
         print(">>> TRAIN & TEST VIT")
@@ -256,7 +260,7 @@ class ViT():
             evaluation_strategy="epoch",
             save_strategy="epoch",
             logging_steps=50,
-            num_train_epochs=self.nb_epochs if not debug else 100,
+            num_train_epochs=self.nb_epochs if not debug else 2,
 
             learning_rate=self.learning_rate,
             weight_decay=0.01,
@@ -500,9 +504,14 @@ class AdvancedClustering():
             cluster_labels: np.ndarray = true_labels[(predicted_clusters==cluster) & (true_labels!=-1)]
             cluster_labels = cluster_labels.astype(np.int32)
 
-            count_labels = np.bincount(cluster_labels)
-            print(f" >> Homogeneity cluster {cluster} : {round(max(count_labels)/sum(count_labels) *100, 2)} %")
-            
-            cluster2label[cluster] = np.argmax(count_labels)
+            if np.any(cluster_labels): # cluster_labels not empty
+
+                count_labels = np.bincount(cluster_labels)
+                print(f" >> Homogeneity cluster {cluster} : {round(max(count_labels)/sum(count_labels) *100, 2)} %")
+                
+                cluster2label[cluster] = np.argmax(count_labels)
+            else:
+                print(f"WARNING : cluster {cluster} has no labled data.")
+                cluster2label[cluster] = 1 # randomly assigned
         
         return cluster2label

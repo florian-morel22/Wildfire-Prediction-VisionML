@@ -41,10 +41,9 @@ def main(args):
             encoder=encoder,
             device=device,
             method=args.clustering_algo, 
-            nb_cluster=args.nb_clusters
+            nb_cluster=args.n_clusters
         )
 
-        transform = None
         sessions.append(("clustering_resnet", method))
     
     if method_name == "advanced_clustering" or method_name == "all":

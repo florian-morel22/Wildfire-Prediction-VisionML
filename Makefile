@@ -11,7 +11,7 @@ CLUSTERING_ALGO="kmeans"
 
 PARAMS = --data_path=$(DATA_PATH)\
 	--n_clusters=$(N_CLUSTERS)\
-	--nb_clusters=$(NB_CLUSTERS)\ 
+	--n_clusters=$(N_CLUSTERS)\ 
 	--clustering_algo=$(CLUSTERING_ALGO)
 	
 NUM_SAMPLES = 300
