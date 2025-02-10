@@ -4,4 +4,6 @@ ENSTA Pratical Work - Wildfire prediction based on images with vision models
 ## Quick run
 
 - run ```make setup```
-- run (on mesogip) ```make run```
+- run ```make run```
+- run with few data to debug : ```make debug```
+- run all the methods with few data to test :  ```make test```

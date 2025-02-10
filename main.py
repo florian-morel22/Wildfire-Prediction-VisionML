@@ -1,56 +1,96 @@
+import os
 import torch
+import random
+import argparse
 
 from pathlib import Path
 from torchvision.transforms import v2
 from torch.utils.data import DataLoader
 
-from methods import BasicCNN, ViT
+from utils import load_data
+from models import ViTEncoder
 from utils import WildfireDataset
-from utils import split_val_dataset
+from torch.utils.data import Subset
+from methods import Method, BasicCNN, ViT, BasicClustering
 
 
-def main():
-    method_name = "vit"
-
-    # variables #
-    batchsize = 10
-    data_folder = Path("./data/valid")
+def main(args):
+    method_name = args.method
+    data_path = Path(args.data_path)
+    num_samples = int(args.num_samples)
     device = torch.device('cuda' if torch.cuda.is_available() else 'mps' if torch.mps.is_available() else 'cpu')
 
-    if method_name == "basic_cnn":
+    sessions = []
+
+    if method_name == "basic_cnn" or method_name == "all":
         method = BasicCNN(device=device)
+        sessions.append(("basic_cnn", method))
 
-        transform = v2.Compose([
-            v2.ToImage(), # Convert into Image tensor
-            v2.ToDtype(torch.float32, scale=True)
-        ])
+    if method_name == "vit" or method_name == "all":
+        method = ViT(device=device, nb_epochs=50, batch_size=50, learning_rate=1e-2)
+        sessions.append(("vit", method))
 
-    elif method_name == "vit":
-        method = ViT(device=device)
+    if method_name == "clustering_vit" or method_name == "all":
+        encoder = ViTEncoder(device=device)
+        method = BasicClustering(
+            encoder=encoder,
+            device=device,
+            algo=args.clustering_algo,
+            nb_cluster=args.nb_clusters
+        )
 
-        feature_extractor_ = method.feature_extractor
-        transform = v2.Compose([
-            v2.ToImage(),
-            v2.ToDtype(torch.float32, scale=True),  # Scale pixel values to [0, 1]
-            v2.Resize((224, 224)),  # Resize images to 224x224
-            v2.Normalize(
-                mean=torch.tensor(feature_extractor_.image_mean, dtype=torch.float32).tolist(),
-                std=torch.tensor(feature_extractor_.image_std, dtype=torch.float32).tolist()
-            ),  # Normalize with float32
-        ])
-    #############
+        sessions.append(("clustering_vit", method))
 
+    train_df, valid_df, test_df = load_data(data_path, args.DEBUG, num_samples=num_samples)
+    
+    for session in sessions:
 
-    train, test = split_val_dataset(data_folder)
+        method_name: str = session[0]
+        method: Method = session[1]
 
-    train_dataset = WildfireDataset(train, transform)
-    test_dataset = WildfireDataset(test, transform)
+        print(f"\033[32m\n>>>>>>>>>> {method_name} <<<<<<<<<<\n\033[0m")
 
-    ####### METHOD #######
-
-    method.train_and_test(train_dataset, test_dataset, nb_epochs=50, batch_size=50, learning_rate=1e-2)
-    method.save()
+        method.process_data(train_df, valid_df, test_df)
+        method.run(args.DEBUG)
+        method.save()
 
 
 if __name__ == '__main__':
-    main()
+
+    parser = argparse.ArgumentParser()
+
+    parser.add_argument("--DEBUG", action="store_true")
+    parser.add_argument(
+        "--method",
+        type=str,
+        default=BasicCNN,
+        choices=["basic_cnn", "vit", "clustering_vit", "all"],
+        help="Method to run"
+    )
+    parser.add_argument(
+        "--data_path",
+        type=str,
+        default="./data/valid",
+    )
+    parser.add_argument(
+        "--nb_clusters",
+        type=int,
+        default=2,
+        help="Number of clusters to use if the clustering method is chosen and kmeans is the clustering algo."
+    )
+    parser.add_argument(
+        "--clustering_algo",
+        default="kmeans",
+        choices=["kmeans", "dbscan"],
+        help="Algo to run if the clustering method is chosen."
+    )
+
+    parser.add_argument(
+        "--num_samples",
+        default=5,
+        help="Number of images samples for DEBUG flag."
+    )
+
+    args = parser.parse_args()
+
+    main(args)
