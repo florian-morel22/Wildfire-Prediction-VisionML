@@ -135,15 +135,14 @@ class ViT():
             learning_rate: float = 1e-2
         ) -> None:
         
-        print(">>> TRAIN")
+        print(">>> TRAIN & TEST VIT")
 
         # default: adamW optimizer
         training_args = TrainingArguments(
-            use_mps_device=True,
             output_dir="./vit-fire-detection",
             per_device_train_batch_size=batch_size,
             per_device_eval_batch_size=batch_size,
-            evaluation_strategy="epoch",
+            eval_strategy="epoch",
             save_strategy="epoch",
             logging_steps=50,
             num_train_epochs=nb_epochs,
@@ -171,5 +170,8 @@ class ViT():
             tokenizer=self.feature_extractor
         )
 
+        try:
         # Train the model
-        trainer.train()
+            trainer.train()
+        except Exception as e:
+            print(f"Exception. {e}")
