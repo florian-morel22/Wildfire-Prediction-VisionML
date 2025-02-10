@@ -201,18 +201,18 @@ class ViT():
 
     def run(self, debug: bool=False) -> None:
         
-        print(">>> TRAIN")
+        print(">>> TRAIN & TEST VIT")
 
         # default: adamW optimizer
         training_args = TrainingArguments(
             # use_mps_device=True,
             output_dir="./vit-fire-detection",
-            per_device_train_batch_size=self.batch_size,
-            per_device_eval_batch_size=self.batch_size,
-            eval_strategy="epoch",
+            per_device_train_batch_size=batch_size,
+            per_device_eval_batch_size=batch_size,
+            evaluation_strategy="epoch",
             save_strategy="epoch",
             logging_steps=50,
-            num_train_epochs=self.nb_epochs if not debug else 1,
+            num_train_epochs=self.nb_epochs if not debug else 100,
 
             learning_rate=self.learning_rate,
             weight_decay=0.01,

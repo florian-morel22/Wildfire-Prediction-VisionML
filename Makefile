@@ -1,7 +1,7 @@
 
 
 PART=ENSTA-h100 #ENSTA-h100 #ENSTA-l40s
-TIME=00:30:00
+TIME=01:00:00
 
 DATA_PATH="./data"
 METHOD="vit" #vit #basic_cnn #clustering_vit #all

@@ -125,7 +125,7 @@ class WildfireDataset(VisionDataset):
 
 
 
-def load_data(data_folder: Path, debug: bool=False) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+def load_data(data_folder: Path, debug: bool=False, num_samples: int=5) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
 
     train_path = data_folder / "train"
     train_nowildfire_files = [file for file in (train_path / "nowildfire").iterdir() if file.is_file()]
@@ -176,9 +176,12 @@ def load_data(data_folder: Path, debug: bool=False) -> tuple[pd.DataFrame, pd.Da
     ])
 
     if debug:
-        train_df = train_df.head()
-        valid_df = valid_df.head()
-        test_df = test_df.head()
+        # train_df = train_df.head(num_samples)
+        # valid_df = valid_df.head(num_samples)
+        # test_df = test_df.head(num_samples)
+        train_df = train_df.iloc[:num_samples]
+        valid_df = valid_df.iloc[:num_samples]
+        test_df = test_df.iloc[:num_samples]
 
     return train_df, valid_df, test_df
 
