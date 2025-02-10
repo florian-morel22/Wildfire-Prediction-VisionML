@@ -5,15 +5,29 @@ import torch.nn.functional as F
 
 from PIL import Image
 from tqdm import tqdm
-from torchvision.transforms import ToPILImage
-from torch.utils.data import DataLoader, Dataset
+from abc import abstractmethod
+from torch.utils.data import Dataset
 from transformers import ViTImageProcessor, ViTModel
+from transformers import SegformerForSemanticSegmentation, SegformerImageProcessor
+
 
 # Abstract class
 class ImageEncoder():
 
-    def encode_images(self):
+    @abstractmethod
+    def encode_image(self, image: Image.Image) -> np.ndarray:
         pass
+
+    def encode_images(self, dataset: Dataset) -> tuple[np.ndarray, np.ndarray]:
+        embeddings = []
+        labels = []
+        for data in tqdm(dataset, desc="Process images"):
+            img, label = data
+            embedding = self.encode_image(img)
+            embeddings.append(embedding)
+            labels.append(label)
+
+        return np.array(embeddings), np.array(labels)
 
 class Net(nn.Module):
     def __init__(self, num_classes=1):
@@ -26,6 +40,7 @@ class Net(nn.Module):
         
         self.global_pool = nn.AdaptiveAvgPool2d(1)
         self.fc1 = nn.Linear(256, 128)
+        self.dropout = nn.Dropout(0.3)
         self.fc2 = nn.Linear(128, num_classes)
 
     def forward(self, x):
@@ -37,6 +52,7 @@ class Net(nn.Module):
         x = torch.flatten(x, 1)
         
         x = F.relu(self.fc1(x))
+        x = self.dropout(x)
         x = self.fc2(x)
         
         return x
@@ -80,20 +96,39 @@ class ViTEncoder(ImageEncoder):
         embedding = outputs.last_hidden_state[:, 0, :].squeeze(0).cpu().numpy()
         return embedding
 
-    def encode_images(self, dataset: Dataset) -> tuple[np.ndarray, np.ndarray]:
-        """
-        Extract embeddings for all images in a dataset.
-        :param dataset: dataset containing images.
-        :return: A matrix of embeddings for all images.
-        """
-
-        embeddings = []
-        labels = []
-        for data in tqdm(dataset, desc="Process images"):
-            img, label = data
-            embedding = self.encode_image(img)
-            embeddings.append(embedding)
-            labels.append(label)
-
-        return np.array(embeddings), np.array(labels)
   
+class SegFormerEncoder(ImageEncoder):
+
+    def __init__(
+            self,
+            model_name: str = "florian-morel22/segformer-b0-deepglobe-land-cover",
+            device: str = "cpu",
+            ):
+        """
+        Initialize the ViT class for unsupervised tasks.
+        The model extracts embeddings instead of performing classification.
+        """
+        self.device = device
+        print(f"Using device: {device}")
+        
+        self.model_name = model_name
+        self.processor = SegformerImageProcessor.from_pretrained("nvidia/segformer-b0-finetuned-ade-512-512")
+        self.model = SegformerForSemanticSegmentation.from_pretrained(self.model_name)
+        self.model.to(self.device)
+
+        self.num_class = 6
+
+    def encode_image(self, image: Image.Image) -> np.ndarray:
+        
+        inputs = self.processor(images=image, return_tensors="pt").to(self.device)
+        outputs = self.model(**inputs)
+        logits = outputs.logits
+        predicted_mask: torch.Tensor = logits.argmax(dim=1)[0]
+        predicted_mask_np = predicted_mask.cpu().numpy()
+
+        # Number of pixels by class
+        encoded_image = np.array([(predicted_mask_np==i).sum() for i in range(self.num_class)])
+
+        return encoded_image
+
+

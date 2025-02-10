@@ -61,13 +61,16 @@ class BasicCNN():
             self.network = self.network.to(self.device)
 
         self.optimizer = optim.SGD(self.network.parameters(), lr=0.01, momentum=0.9)
+        self.scheduler = optim.lr_scheduler.ReduceLROnPlateau(self.optimizer, mode='min', factor=0.1, patience=5)
         self.criterion = nn.BCEWithLogitsLoss()
+
 
     def process_data(
             self,
             train_df: pd.DataFrame,
             valid_df: pd.DataFrame,
             test_df: pd.DataFrame,
+            use_train_data: bool=False
         ) -> None:
         
         transform = v2.Compose([
@@ -75,23 +78,31 @@ class BasicCNN():
             v2.ToDtype(torch.float32, scale=True)
         ])
 
-        train, val = train_test_split(valid_df, train_size=0.8, random_state=42, shuffle=True)
+        if not use_train_data:
+            train_df, valid_df = train_test_split(valid_df, test_size=0.2) #split valid in new train/valid
 
-        self.train_dataset = WildfireDataset(train, transform)
-        self.val_dataset = WildfireDataset(val, transform)
+        self.train_dataset = WildfireDataset(train_df, transform)
+        self.val_dataset = WildfireDataset(valid_df, transform)
         self.test_dataset = WildfireDataset(test_df, transform)
+
+        print(f">> train dataset : {len(self.train_dataset)} rows.")
+        print(f">> validation dataset : {len(self.val_dataset)} rows.")
+        print(f">> test dataset : {len(self.test_dataset)} rows.")
 
     def train(self, debug: bool=False) -> None:
         
         trainloader: DataLoader = DataLoader(self.train_dataset, self.batch_size, shuffle=True, num_workers=4)
+        valloader: DataLoader = DataLoader(self.val_dataset, self.batch_size, shuffle=False, num_workers=4)
 
         print(">>> TRAIN")
 
         nb_epochs = self.nb_epochs if not debug else 2
         for epoch in range(nb_epochs):
 
+            ## TRAIN ##
+            self.network.train()
             running_loss = 0.0
-            pbar = tqdm(enumerate(trainloader, 0), total=len(trainloader), desc=f"epoch {epoch}")
+            pbar = tqdm(enumerate(trainloader, 0), total=len(trainloader), desc=f"train")
             for i, data in pbar:
                 inputs, labels = data
 
@@ -107,6 +118,39 @@ class BasicCNN():
 
                 running_loss += loss.item()
                 pbar.set_postfix({'loss': running_loss/(i+1)}, refresh=True)
+
+            ## VALIDATION ##
+            with torch.no_grad():
+                    
+                self.network.eval()
+                val_loss = 0.0
+                correct = 0
+                total = 0
+
+                pbar = tqdm(enumerate(valloader, 0), total=len(valloader), desc=f"val")
+                for i, data in pbar:
+                    images, labels = data
+                    images, labels = images.to(self.device), labels.to(self.device)
+
+                    outputs = self.network(images)
+                    loss = self.criterion(outputs, labels.view(-1, 1))
+                    val_loss += loss.item()
+                    
+                    # Compute accuracy
+                    predicted = (torch.sigmoid(outputs) > 0.5).to(torch.float32)
+                    labels = labels.view_as(predicted)
+
+                    total += labels.size(0)
+                    correct += (predicted == labels).sum().item()
+
+            # Print statistics
+            train_loss = running_loss / len(trainloader)
+            val_loss /= len(valloader)
+            val_accuracy = 100 * correct / total
+
+            self.scheduler.step(val_loss)
+
+            print(f"Epoch [{epoch+1}/{self.nb_epochs}] - Train Loss: {train_loss:.4f} | Val Loss: {val_loss:.4f} | Val Accuracy: {val_accuracy:.2f}%")
 
     def test(self) -> None:
 
@@ -207,8 +251,8 @@ class ViT():
         training_args = TrainingArguments(
             # use_mps_device=True,
             output_dir="./vit-fire-detection",
-            per_device_train_batch_size=batch_size,
-            per_device_eval_batch_size=batch_size,
+            per_device_train_batch_size=self.batch_size,
+            per_device_eval_batch_size=self.batch_size,
             evaluation_strategy="epoch",
             save_strategy="epoch",
             logging_steps=50,
@@ -297,14 +341,14 @@ class BasicClustering():
             device: str = "cpu",
             algo: str = "kmeans",
             **kwargs
-            ):
+        ):
         
-         self.device = device
-         self.encoder = encoder
-         self.clustering_model = None
-         self.algo = algo
+        self.device = device
+        self.encoder = encoder
+        self.clustering_model = None
+        self.algo = algo
 
-         self.kwargs = kwargs
+        self.kwargs = kwargs
 
     def process_data(
         self,
@@ -353,3 +397,112 @@ class BasicClustering():
 
     def save(self):
         pass
+
+class AdvancedClustering():
+
+    def __init__(
+            self,
+            encoder: ImageEncoder,
+            device: str = "cpu",
+            algo: str = "kmeans",
+            nb_epochs: int = 7,
+            batch_size: int = 50,
+            learning_rate: float = 1e-3,
+            network: nn.Module = None,
+            **kwargs
+    ):
+        self.device = device
+        self.encoder = encoder
+        self.clustering_model = None
+        self.algo = algo
+
+        self.sub_method = BasicCNN(
+            network=network,
+            device=self.device,
+            nb_epochs=nb_epochs,
+            batch_size = batch_size,
+            learning_rate=learning_rate
+        )
+
+        self.kwargs = kwargs
+
+    def process_data(
+        self,
+        train_df: pd.DataFrame,
+        valid_df: pd.DataFrame,
+        test_df: pd.DataFrame,
+    ) -> None:
+        
+        transform = None
+
+        valid_train_df, valid_valid_df = train_test_split(valid_df, test_size=0.2) #split valid in new train/valid
+
+        self.train_dataset = WildfireDataset(pd.concat([train_df, valid_train_df]), transform)
+        self.val_dataset = WildfireDataset(valid_valid_df, transform)
+        self.test_dataset = WildfireDataset(test_df, transform)
+
+        print(f">> train dataset : {len(self.train_dataset)} rows.")
+        print(f">> validation dataset : {len(self.val_dataset)} rows.")
+        print(f">> test dataset : {len(self.test_dataset)} rows.")
+
+    def generate_synthetic_annotation(self):
+
+        encoded_images, true_labels = self.encoder.encode_images(self.train_dataset)
+
+        if self.algo == "kmeans":
+            n_clusters = self.kwargs.get("n_clusters", 2)
+            print(f"Clustering with K-Means (n_clusters={n_clusters})")
+            self.clustering_model = KMeans(n_clusters=n_clusters, random_state=42)
+        
+        elif self.algo == "dbscan":
+            eps = self.kwargs.get("eps", 0.5)
+            min_samples = self.kwargs.get("min_samples", 5)
+            print(f"Clustering with DBSCAN (eps={eps}, min_samples={min_samples})")
+            self.clustering_model = DBSCAN(eps=eps, min_samples=min_samples)
+
+        else:
+            raise ValueError("Invalid clustering method. Choose 'kmeans' or 'dbscan'.")
+        
+        predicted_clusters = self.clustering_model.fit_predict(encoded_images)
+
+        cluster2label = self.assign_label_to_cluster(n_clusters, true_labels, predicted_clusters)
+
+        for i, (cluster, true_label) in enumerate(zip(predicted_clusters, true_labels)):
+            if true_label == -1:
+                new_label = cluster2label[cluster]
+                self.train_dataset.update_label(i, new_label)
+
+    def run(self, debug: bool=False):
+        self.generate_synthetic_annotation()
+
+        print(" ")
+        self.sub_method.process_data(
+            self.train_dataset.dataframe,
+            self.val_dataset.dataframe,
+            self.test_dataset.dataframe,
+            use_train_data=True,
+        )
+        self.sub_method.run()
+
+    def save(self):
+        pass
+
+    def assign_label_to_cluster(
+            self,
+            n_clusters: str,
+            true_labels: np.ndarray,
+            predicted_clusters: np.ndarray,            
+        ) -> list[dict]:
+
+        cluster2label: dict = {}
+
+        for cluster in range(n_clusters):
+            cluster_labels: np.ndarray = true_labels[(predicted_clusters==cluster) & (true_labels!=-1)]
+            cluster_labels = cluster_labels.astype(np.int32)
+
+            count_labels = np.bincount(cluster_labels)
+            print(f" >> Homogeneity cluster {cluster} : {round(max(count_labels)/sum(count_labels) *100, 2)} %")
+            
+            cluster2label[cluster] = np.argmax(count_labels)
+        
+        return cluster2label

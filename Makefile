@@ -1,18 +1,19 @@
 
 
 PART=ENSTA-h100 #ENSTA-h100 #ENSTA-l40s
-TIME=01:00:00
+TIME=04:00:00
 
 DATA_PATH="./data"
-METHOD="vit" #vit #basic_cnn #clustering_vit #all
+METHOD="basic_cnn" #vit #basic_cnn #clustering_vit #all #advanced_clustering #advanced_clustering1
 
-NB_CLUSTERS=2
+N_CLUSTERS=5
 CLUSTERING_ALGO="kmeans"
 
 PARAMS = --data_path=$(DATA_PATH)\
-	--nb_clusters=$(NB_CLUSTERS)\
+	--n_clusters=$(N_CLUSTERS)\
 	--clustering_algo=$(CLUSTERING_ALGO)
-
+	
+NUM_SAMPLES = 300
 
 setup: download_dataset
 
@@ -35,7 +36,7 @@ run:
 	srun --pty --time=$(TIME) --partition=$(PART) --gpus=1 python main.py --method=$(METHOD) $(PARAMS)
 
 debug:
-	srun --pty --time=$(TIME) --partition=$(PART) --gpus=1 python main.py --DEBUG --method=$(METHOD) $(PARAMS)
+	srun --pty --time=$(TIME) --partition=$(PART) --gpus=1 python main.py --DEBUG --method=$(METHOD) $(PARAMS) --num_samples=$(NUM_SAMPLES)
 
 test:
-	srun --pty --time=$(TIME) --partition=$(PART) --gpus=1 python main.py --DEBUG --method=all $(PARAMS)
+	srun --pty --time=$(TIME) --partition=$(PART) --gpus=1 python main.py --DEBUG --method=all $(PARAMS) --num_samples=5

@@ -1,17 +1,11 @@
-import os
 import torch
-import random
 import argparse
 
 from pathlib import Path
-from torchvision.transforms import v2
-from torch.utils.data import DataLoader
 
 from utils import load_data
-from models import ViTEncoder
-from utils import WildfireDataset
-from torch.utils.data import Subset
-from methods import Method, BasicCNN, ViT, BasicClustering
+from models import ViTEncoder, SegFormerEncoder
+from methods import Method, BasicCNN, ViT, BasicClustering, AdvancedClustering
 
 
 def main(args):
@@ -36,10 +30,32 @@ def main(args):
             encoder=encoder,
             device=device,
             algo=args.clustering_algo,
-            nb_cluster=args.nb_clusters
+            n_clusters=args.n_clusters
         )
 
         sessions.append(("clustering_vit", method))
+    
+    if method_name == "advanced_clustering" or method_name == "all":
+        encoder = ViTEncoder(device=device)
+        method = AdvancedClustering(
+            encoder=encoder,
+            device=device,
+            algo=args.clustering_algo,
+            n_clusters=args.n_clusters
+        )
+        
+        sessions.append(("advanced_clustering", method))
+
+    if method_name == "advanced_clustering1" or method_name == "all":
+        encoder = SegFormerEncoder(device=device)
+        method = AdvancedClustering(
+            encoder=encoder,
+            device=device,
+            algo=args.clustering_algo,
+            n_clusters=args.n_clusters
+        )
+        
+        sessions.append(("advanced_clustering1", method))
 
     train_df, valid_df, test_df = load_data(data_path, args.DEBUG, num_samples=num_samples)
     
@@ -64,7 +80,6 @@ if __name__ == '__main__':
         "--method",
         type=str,
         default=BasicCNN,
-        choices=["basic_cnn", "vit", "clustering_vit", "all"],
         help="Method to run"
     )
     parser.add_argument(
@@ -73,7 +88,7 @@ if __name__ == '__main__':
         default="./data/valid",
     )
     parser.add_argument(
-        "--nb_clusters",
+        "--n_clusters",
         type=int,
         default=2,
         help="Number of clusters to use if the clustering method is chosen and kmeans is the clustering algo."

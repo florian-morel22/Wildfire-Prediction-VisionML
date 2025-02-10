@@ -27,15 +27,15 @@ class WildfireDataset(VisionDataset):
             target_transform: v2.Compose=None,
             method_name: str=None
         ):
-        self.dataframe = dataframe
-        self.filenames = self.dataframe["file"].reset_index(drop=True)
-        self.labels = self.dataframe["label"].reset_index(drop=True)
+        self.dataframe = dataframe.reset_index(drop=True)
+        self.filenames = self.dataframe["file"].copy()
+        self.labels = self.dataframe["label"].copy()
         self.transform = transform
         self.target_transform = target_transform
         self.method_name = method_name
 
     def __getitem__(self, index: int) -> dict:
-        img_path = self.filenames[index]
+        img_path: Path = self.filenames[index]
         target: int = self.labels[index]
         
         try:
@@ -122,13 +122,24 @@ class WildfireDataset(VisionDataset):
 
     def __dataloader__(self, batchsize=10, num_workers=4) -> DataLoader:
         return DataLoader(self, batch_size=batchsize, shuffle=True, num_workers=num_workers)
+    
+    def update_label(self, index: int, value: int):
+        assert value in [0, 1], "The new value must be 0 or 1."
+        if self.labels[index] in [0, 1]:
+            print(f"WARNING : label of {index} is already in [0, 1]. Are you sure you want to update it ?")
 
-
+        self.labels.loc[index] = value
+        self.dataframe.loc[index, "label"] = value
 
 def load_data(data_folder: Path, debug: bool=False, num_samples: int=5) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
 
+    corrupted_files = [
+        data_folder / "test/wildfire/-73.15884,46.38819.jpg", 
+        data_folder / "train/nowildfire/-114.152378,51.027198.jpg"
+    ]
+
     train_path = data_folder / "train"
-    train_nowildfire_files = [file for file in (train_path / "nowildfire").iterdir() if file.is_file()]
+    train_nowildfire_files = [file for file in (train_path / "nowildfire").iterdir() if file.is_file() and file not in corrupted_files]
     train_wildfire_files = [file for file in (train_path / "wildfire").iterdir() if file.is_file()]
 
     valid_path = data_folder / "valid"
@@ -137,7 +148,9 @@ def load_data(data_folder: Path, debug: bool=False, num_samples: int=5) -> tuple
 
     test_path = data_folder / "test"
     test_nowildfire_files = [file for file in (test_path / "nowildfire").iterdir() if file.is_file()]
-    test_wildfire_files = [file for file in (test_path / "wildfire").iterdir() if file.is_file()]
+    test_wildfire_files = [file for file in (test_path / "wildfire").iterdir() if file.is_file() and file not in corrupted_files]
+
+
 
     train_df = pd.DataFrame([
         {
@@ -175,10 +188,10 @@ def load_data(data_folder: Path, debug: bool=False, num_samples: int=5) -> tuple
         for file in test_wildfire_files
     ])
 
+    train_df = train_df.sample(frac=1)
+    valid_df = valid_df.sample(frac=1)
+
     if debug:
-        # train_df = train_df.head(num_samples)
-        # valid_df = valid_df.head(num_samples)
-        # test_df = test_df.head(num_samples)
         train_df = train_df.iloc[:num_samples]
         valid_df = valid_df.iloc[:num_samples]
         test_df = test_df.iloc[:num_samples]
