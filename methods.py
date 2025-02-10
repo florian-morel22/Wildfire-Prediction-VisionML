@@ -212,7 +212,7 @@ class ViT():
             eval_strategy="epoch",
             save_strategy="epoch",
             logging_steps=50,
-            num_train_epochs=self.nb_epochs if not debug else 1,
+            num_train_epochs=self.nb_epochs if not debug else 100,
 
             learning_rate=self.learning_rate,
             weight_decay=0.01,

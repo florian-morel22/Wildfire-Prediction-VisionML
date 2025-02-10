@@ -17,6 +17,7 @@ from methods import Method, BasicCNN, ViT, BasicClustering
 def main(args):
     method_name = args.method
     data_path = Path(args.data_path)
+    num_samples = int(args.num_samples)
     device = torch.device('cuda' if torch.cuda.is_available() else 'mps' if torch.mps.is_available() else 'cpu')
 
     sessions = []
@@ -40,7 +41,7 @@ def main(args):
 
         sessions.append(("clustering_vit", method))
 
-    train_df, valid_df, test_df = load_data(data_path, args.DEBUG)
+    train_df, valid_df, test_df = load_data(data_path, args.DEBUG, num_samples=num_samples)
     
     for session in sessions:
 
@@ -82,6 +83,12 @@ if __name__ == '__main__':
         default="kmeans",
         choices=["kmeans", "dbscan"],
         help="Algo to run if the clustering method is chosen."
+    )
+
+    parser.add_argument(
+        "--num_samples",
+        default=5,
+        help="Number of images samples for DEBUG flag."
     )
 
     args = parser.parse_args()
