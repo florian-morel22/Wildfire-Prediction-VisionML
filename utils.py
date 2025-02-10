@@ -12,26 +12,47 @@ from torchvision.datasets.vision import VisionDataset
 from torchvision.transforms.functional import to_pil_image
 
 class WildfireDataset(VisionDataset):
+    """Create a Dataset with WildFire data
     
-    def __init__(self, dataframe: pd.DataFrame, transform=None):
+    :args:
+        ...
+        method_name : name of the method that will use this dataset.
+        It is only required if the method needs a specific dataset formating
+    """
+    
+    def __init__(
+            self,
+            dataframe: pd.DataFrame,
+            transform: v2.Compose=None,
+            target_transform: v2.Compose=None,
+            method_name: str=None
+        ):
         self.dataframe = dataframe
         self.filenames = self.dataframe["file"].reset_index(drop=True)
         self.labels = self.dataframe["label"].reset_index(drop=True)
         self.transform = transform
+        self.target_transform = target_transform
+        self.method_name = method_name
 
     def __getitem__(self, index: int) -> dict:
         img_path = self.filenames[index]
+        target: int = self.labels[index]
+        
         try:
             X = Image.open(img_path).convert("RGB")
         except Exception as e:
             raise RuntimeError(f"Error loading image {img_path}: {e}")
 
-        target: int = self.labels[index]
-
         if self.transform:
             X = self.transform(X)
+        
+        if self.target_transform:
+            target = self.target_transform(target)
 
-        return X, target
+        if self.method_name == "vit":
+            return {"pixel_values": X, "labels": target}
+        else:
+            return X, target
 
     def __len__(self):
         return len(self.filenames)
@@ -40,7 +61,6 @@ class WildfireDataset(VisionDataset):
         for i in range(len(self.filenames)):
             yield self.__getitem__(i)
 
-    
     def __showitem__(self, index: int, mean=None, std=None):
 
         dict_ = self.__getitem__(index)
@@ -103,57 +123,64 @@ class WildfireDataset(VisionDataset):
     def __dataloader__(self, batchsize=10, num_workers=4) -> DataLoader:
         return DataLoader(self, batch_size=batchsize, shuffle=True, num_workers=num_workers)
 
-class WildfireDataset_ViT(WildfireDataset):
-    
-    def __init__(self, dataset: WildfireDataset):
-        super().__init__(dataset.dataframe, dataset.transform)
-        self.dataset = dataset
-
-    def __getitem__(self, index: int) -> dict:
-
-        img = self.dataset[index][0]
-        target = self.dataset[index][1]
-
-        target = [1, 0] if target==0 else [0, 1]
-        target = torch.tensor(target, dtype=torch.float32)
-
-        return {"pixel_values": img, "labels": target}
-
-        
-    def __len__(self):
-        return len(self.filenames)
-    
-    def __dataloader__(self, batchsize=10, num_workers=4) -> DataLoader:
-        return DataLoader(self, batch_size=batchsize, shuffle=True, num_workers=num_workers)
 
 
+def load_data(data_folder: Path, debug: bool=False) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
 
-def split_val_dataset(data_folder: Path, debug: bool=False) -> tuple[pd.DataFrame, pd.DataFrame]:
+    train_path = data_folder / "train"
+    train_nowildfire_files = [file for file in (train_path / "nowildfire").iterdir() if file.is_file()]
+    train_wildfire_files = [file for file in (train_path / "wildfire").iterdir() if file.is_file()]
 
-    nowildfire_files = [file for file in (data_folder / "nowildfire").iterdir() if file.is_file()]
-    wildfire_files = [file for file in (data_folder / "wildfire").iterdir() if file.is_file()]
+    valid_path = data_folder / "valid"
+    valid_nowildfire_files = [file for file in (valid_path / "nowildfire").iterdir() if file.is_file()]
+    valid_wildfire_files = [file for file in (valid_path / "wildfire").iterdir() if file.is_file()]
 
-    if debug:
-        nowildfire_files = nowildfire_files[:5]
-        wildfire_files = wildfire_files[:5]
+    test_path = data_folder / "test"
+    test_nowildfire_files = [file for file in (test_path / "nowildfire").iterdir() if file.is_file()]
+    test_wildfire_files = [file for file in (test_path / "wildfire").iterdir() if file.is_file()]
 
-    fulldataset = pd.DataFrame([
+    train_df = pd.DataFrame([
+        {
+            "file": file,
+            "label": -1.
+        }
+        for file in train_nowildfire_files + train_wildfire_files
+    ])
+
+    valid_df = pd.DataFrame([
         {
             "file": file,
             "label": 0.
         }
-        for file in nowildfire_files
+        for file in valid_nowildfire_files
     ] + [
         {
             "file": file,
             "label": 1.
         }
-        for file in wildfire_files
+        for file in valid_wildfire_files
     ])
 
-    train, valid = train_test_split(fulldataset, train_size=0.8, random_state=42, shuffle=True)
+    test_df = pd.DataFrame([
+        {
+            "file": file,
+            "label": 0.
+        }
+        for file in test_nowildfire_files
+    ] + [
+        {
+            "file": file,
+            "label": 1.
+        }
+        for file in test_wildfire_files
+    ])
 
-    return train, valid
+    if debug:
+        train_df = train_df.head()
+        valid_df = valid_df.head()
+        test_df = test_df.head()
+
+    return train_df, valid_df, test_df
 
 
 def compute_metrics(pred):

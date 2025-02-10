@@ -1,10 +1,10 @@
 
 
-PART=ENSTA-l40s #ENSTA-h100
+PART=ENSTA-h100 #ENSTA-h100 #ENSTA-l40s
 TIME=00:30:00
 
-DATA_PATH="./data/valid"
-METHOD="basic_cnn" #vit #basic_cnn #clustering_vit #all
+DATA_PATH="./data"
+METHOD="vit" #vit #basic_cnn #clustering_vit #all
 
 NB_CLUSTERS=2
 CLUSTERING_ALGO="kmeans"
@@ -27,7 +27,7 @@ download_dataset:
 	curl -L -o ./data/wildfire-prediction-dataset.zip\
   	https://www.kaggle.com/api/v1/datasets/download/abdelghaniaaba/wildfire-prediction-dataset
 
-	unzip ./data/wildfire-prediction-dataset.zip valid/*/*.jpg -d ./data
+	unzip ./data/wildfire-prediction-dataset.zip -d ./data
 
 	rm ./data/wildfire-prediction-dataset.zip
 	

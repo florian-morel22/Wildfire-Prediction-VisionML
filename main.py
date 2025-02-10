@@ -7,10 +7,10 @@ from pathlib import Path
 from torchvision.transforms import v2
 from torch.utils.data import DataLoader
 
+from utils import load_data
+from models import ViTEncoder
 from utils import WildfireDataset
 from torch.utils.data import Subset
-from utils import split_val_dataset
-from models import ViTEncoder
 from methods import Method, BasicCNN, ViT, BasicClustering
 
 
@@ -23,30 +23,11 @@ def main(args):
 
     if method_name == "basic_cnn" or method_name == "all":
         method = BasicCNN(device=device)
-
-        transform = v2.Compose([
-            v2.ToImage(), # Convert into Image tensor
-            v2.ToDtype(torch.float32, scale=True)
-        ])
-
-        sessions.append(("basic_cnn", method, transform))
+        sessions.append(("basic_cnn", method))
 
     if method_name == "vit" or method_name == "all":
-        nb_epochs = 1 if args.DEBUG else 50
-        method = ViT(device=device, nb_epochs=nb_epochs, batch_size=50, learning_rate=1e-2)
-
-        feature_extractor_ = method.feature_extractor
-        transform = v2.Compose([
-            v2.ToImage(),
-            v2.ToDtype(torch.float32, scale=True),  # Scale pixel values to [0, 1]
-            v2.Resize((224, 224)),  # Resize images to 224x224
-            v2.Normalize(
-                mean=torch.tensor(feature_extractor_.image_mean, dtype=torch.float32).tolist(),
-                std=torch.tensor(feature_extractor_.image_std, dtype=torch.float32).tolist()
-            ),  # Normalize with float32
-        ])
-
-        sessions.append(("vit", method, transform))
+        method = ViT(device=device, nb_epochs=50, batch_size=50, learning_rate=1e-2)
+        sessions.append(("vit", method))
 
     if method_name == "clustering_vit" or method_name == "all":
         encoder = ViTEncoder(device=device)
@@ -57,24 +38,19 @@ def main(args):
             nb_cluster=args.nb_clusters
         )
 
-        transform = None
+        sessions.append(("clustering_vit", method))
 
-        sessions.append(("clustering_vit", method, transform))
-
-    train, test = split_val_dataset(data_path, args.DEBUG)
+    train_df, valid_df, test_df = load_data(data_path, args.DEBUG)
     
     for session in sessions:
 
         method_name: str = session[0]
         method: Method = session[1]
-        transform: v2.Compose = session[2]
 
         print(f"\033[32m\n>>>>>>>>>> {method_name} <<<<<<<<<<\n\033[0m")
 
-        train_dataset = WildfireDataset(train, transform)
-        test_dataset = WildfireDataset(test, transform)
-
-        method.run(train_dataset, test_dataset)
+        method.process_data(train_df, valid_df, test_df)
+        method.run(args.DEBUG)
         method.save()
 
 

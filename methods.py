@@ -2,28 +2,38 @@ import os
 import torch
 import torch.nn as nn
 import torch.optim as optim
-
+import pandas as pd
 
 from tqdm import tqdm
-from torch.utils.data import DataLoader, Dataset
-from models import Net, ImageEncoder, ViTEncoder
+from utils import load_data
+from utils import WildfireDataset
+from torchvision.transforms import v2
+from torch.utils.data import DataLoader
+from models import Net, ImageEncoder
+from sklearn.model_selection import train_test_split
 
 # ViT
-from transformers import ViTImageProcessor, ViTModel, ViTForImageClassification, TrainingArguments, Trainer
-from utils import compute_metrics, WildfireDataset_ViT
+from transformers import ViTImageProcessor, ViTForImageClassification, TrainingArguments, Trainer
+from utils import compute_metrics
 from transformers import AutoModelForImageClassification, AutoFeatureExtractor
 from PIL import Image
 from abc import abstractmethod
+
 
 # ViT unsupervised: get embeddings
 import numpy as np
 from sklearn.cluster import KMeans, DBSCAN
 
 
+
 class Method():
 
     @abstractmethod
-    def run(train_dataset, test_dataset):
+    def process_data():
+        pass
+
+    @abstractmethod
+    def run(debug: bool=False):
         pass
 
     @abstractmethod
@@ -53,16 +63,34 @@ class BasicCNN():
         self.optimizer = optim.SGD(self.network.parameters(), lr=0.01, momentum=0.9)
         self.criterion = nn.BCEWithLogitsLoss()
 
-    def train(
+    def process_data(
             self,
-            train_dataset: Dataset,
-    ) -> None:
+            train_df: pd.DataFrame,
+            valid_df: pd.DataFrame,
+            test_df: pd.DataFrame,
+        ) -> None:
         
-        trainloader: DataLoader = DataLoader(train_dataset, self.batch_size, shuffle=True, num_workers=4)
+        transform = v2.Compose([
+            v2.ToImage(), # Convert into Image tensor
+            v2.ToDtype(torch.float32, scale=True)
+        ])
+
+        train, val = train_test_split(valid_df, train_size=0.8, random_state=42, shuffle=True)
+
+        print(train.shape)
+
+        self.train_dataset = WildfireDataset(train, transform)
+        self.val_dataset = WildfireDataset(val, transform)
+        self.test_dataset = WildfireDataset(test_df, transform)
+
+    def train(self, debug: bool=False) -> None:
+        
+        trainloader: DataLoader = DataLoader(self.train_dataset, self.batch_size, shuffle=True, num_workers=4)
 
         print(">>> TRAIN")
-        
-        for epoch in range(self.nb_epochs):
+
+        nb_epochs = self.nb_epochs if not debug else 2
+        for epoch in range(nb_epochs):
 
             running_loss = 0.0
             pbar = tqdm(enumerate(trainloader, 0), total=len(trainloader), desc=f"epoch {epoch}")
@@ -82,16 +110,14 @@ class BasicCNN():
                 running_loss += loss.item()
                 pbar.set_postfix({'loss': running_loss/(i+1)}, refresh=True)
 
-    def test(
-            self,
-            test_dataset: Dataset,
-    ) -> None:
+    def test(self) -> None:
+
         correct = 0
         total = 0
 
         print(">>> TEST")
         print("TODO: Voir autres scores")
-        testloader: DataLoader = DataLoader(test_dataset, batch_size=1, shuffle=False, num_workers=4)
+        testloader: DataLoader = DataLoader(self.test_dataset, batch_size=1, shuffle=False, num_workers=4)
         
         with torch.no_grad():
             for data in tqdm(testloader, total=len(testloader)):
@@ -110,13 +136,11 @@ class BasicCNN():
 
     def run(
             self,
-            train_dataset: Dataset,
-            test_dataset: Dataset,
+            debug: bool=False
         ) -> None:
 
-        self.train(train_dataset)
-        self.test(test_dataset)
-
+        self.train(debug)
+        self.test()
 
     def save(self):
         """save the model, the loss plot..."""
@@ -138,7 +162,6 @@ class ViT():
         self.batch_size = batch_size
         self.learning_rate = learning_rate
 
-
         self.feature_extractor = ViTImageProcessor.from_pretrained(model_name)
 
         self.model = ViTForImageClassification.from_pretrained(
@@ -149,17 +172,38 @@ class ViT():
             )
         self.model.to(device)
 
-    def run(
+    def process_data(
             self,
-            train_dataset,
-            test_dataset,
-        ) -> None:
+            train_df: pd.DataFrame,
+            valid_df: pd.DataFrame,
+            test_df: pd.DataFrame,
+    ):
+        
+        feature_extractor_ = self.feature_extractor
+        transform = v2.Compose([
+            v2.ToImage(),
+            v2.ToDtype(torch.float32, scale=True),  # Scale pixel values to [0, 1]
+            v2.Resize((224, 224)),  # Resize images to 224x224
+            v2.Normalize(
+                mean=torch.tensor(feature_extractor_.image_mean, dtype=torch.float32).tolist(),
+                std=torch.tensor(feature_extractor_.image_std, dtype=torch.float32).tolist()
+            ),  # Normalize with float32
+        ])
+
+        target_transform = v2.Compose([
+            v2.Lambda(lambda target: torch.tensor([1., 0.]) if target == 0 else torch.tensor([0., 1.])),
+            v2.ToDtype(torch.float32, scale=True)
+        ])
+
+        train, val = train_test_split(valid_df, train_size=0.8, random_state=42, shuffle=True)
+
+        self.train_dataset = WildfireDataset(train, transform, target_transform, "vit")
+        self.val_dataset = WildfireDataset(val, transform, target_transform, "vit")
+        self.test_dataset = WildfireDataset(test_df, transform, target_transform, "vit")
+
+    def run(self, debug: bool=False) -> None:
         
         print(">>> TRAIN")
-
-        # ViT training requires a specific format of dataset
-        train_dataset = WildfireDataset_ViT(train_dataset)
-        test_dataset = WildfireDataset_ViT(test_dataset)
 
         # default: adamW optimizer
         training_args = TrainingArguments(
@@ -170,7 +214,7 @@ class ViT():
             eval_strategy="epoch",
             save_strategy="epoch",
             logging_steps=50,
-            num_train_epochs=self.nb_epochs,
+            num_train_epochs=self.nb_epochs if not debug else 1,
 
             learning_rate=self.learning_rate,
             weight_decay=0.01,
@@ -190,11 +234,10 @@ class ViT():
             model=self.model,
             args=training_args,
             compute_metrics=compute_metrics,
-            train_dataset=train_dataset,
-            eval_dataset=test_dataset,
+            train_dataset=self.train_dataset,
+            eval_dataset=self.test_dataset,
             processing_class=self.feature_extractor
         )
-
         trainer.train()
         try:
         # Train the model
@@ -264,9 +307,20 @@ class BasicClustering():
          self.method = method
 
          self.kwargs = kwargs
-        
 
-    def run(self, train_dataset: Dataset, test_dataset: Dataset):
+    def process_data(
+        self,
+        train_df: pd.DataFrame,
+        valid_df: pd.DataFrame,
+        test_df: pd.DataFrame,
+    ) -> None:
+        
+        transform = None
+
+        self.train_dataset = WildfireDataset(valid_df, transform)
+        self.test_dataset = WildfireDataset(test_df, transform)
+        
+    def run(self, debug: bool=False):
         """
         Apply a clustering algorithm to the extracted embeddings.
         :param embeddings: Matrix of embeddings (numpy array).
@@ -275,7 +329,7 @@ class BasicClustering():
         :return: Cluster labels for the embeddings.
         """
 
-        encoded_images, labels_true = self.encoder.encode_images(train_dataset)
+        encoded_images, labels_true = self.encoder.encode_images(self.train_dataset)
 
         if self.method == "kmeans":
             n_clusters = self.kwargs.get("n_clusters", 2)
