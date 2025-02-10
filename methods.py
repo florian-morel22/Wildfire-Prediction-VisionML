@@ -77,8 +77,6 @@ class BasicCNN():
 
         train, val = train_test_split(valid_df, train_size=0.8, random_state=42, shuffle=True)
 
-        print(train.shape)
-
         self.train_dataset = WildfireDataset(train, transform)
         self.val_dataset = WildfireDataset(val, transform)
         self.test_dataset = WildfireDataset(test_df, transform)
@@ -297,14 +295,14 @@ class BasicClustering():
             self,
             encoder: ImageEncoder,
             device: str = "cpu",
-            method: str = "kmeans",
+            algo: str = "kmeans",
             **kwargs
             ):
         
          self.device = device
          self.encoder = encoder
          self.clustering_model = None
-         self.method = method
+         self.algo = algo
 
          self.kwargs = kwargs
 
@@ -331,12 +329,12 @@ class BasicClustering():
 
         encoded_images, labels_true = self.encoder.encode_images(self.train_dataset)
 
-        if self.method == "kmeans":
+        if self.algo == "kmeans":
             n_clusters = self.kwargs.get("n_clusters", 2)
             print(f"Clustering with K-Means (n_clusters={n_clusters})")
             self.clustering_model = KMeans(n_clusters=n_clusters, random_state=42)
         
-        elif self.method == "dbscan":
+        elif self.algo == "dbscan":
             eps = self.kwargs.get("eps", 0.5)
             min_samples = self.kwargs.get("min_samples", 5)
             print(f"Clustering with DBSCAN (eps={eps}, min_samples={min_samples})")

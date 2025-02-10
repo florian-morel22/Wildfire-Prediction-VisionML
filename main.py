@@ -34,7 +34,7 @@ def main(args):
         method = BasicClustering(
             encoder=encoder,
             device=device,
-            method=args.clustering_algo,
+            algo=args.clustering_algo,
             nb_cluster=args.nb_clusters
         )
 
