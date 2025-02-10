@@ -207,8 +207,8 @@ class ViT():
         training_args = TrainingArguments(
             # use_mps_device=True,
             output_dir="./vit-fire-detection",
-            per_device_train_batch_size=batch_size,
-            per_device_eval_batch_size=batch_size,
+            per_device_train_batch_size=self.batch_size,
+            per_device_eval_batch_size=self.batch_size,
             evaluation_strategy="epoch",
             save_strategy="epoch",
             logging_steps=50,
@@ -345,7 +345,7 @@ class BasicClustering():
         
         labels_kmeans = self.clustering_model.fit_predict(encoded_images)
 
-        print(f"labels kmean: {labels_kmeans}")
+        print(f"labels kmean: {labels_kmeans}") 
 
         accuracy = sum(labels_true==labels_kmeans)/len(labels_true)
 

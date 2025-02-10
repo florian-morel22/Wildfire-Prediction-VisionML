@@ -41,7 +41,9 @@ class WildfireDataset(VisionDataset):
         try:
             X = Image.open(img_path).convert("RGB")
         except Exception as e:
-            raise RuntimeError(f"Error loading image {img_path}: {e}")
+            # raise RuntimeError(f"Error loading image {img_path}: {e}")
+            print(f"⚠️ Image corrompue ignorée: {img_path} ({e})")
+            return None
 
         if self.transform:
             X = self.transform(X)

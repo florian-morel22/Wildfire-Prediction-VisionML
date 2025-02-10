@@ -7,8 +7,8 @@ from pathlib import Path
 from torchvision.transforms import v2
 from torch.utils.data import DataLoader
 
-from utils import load_data
-from models import ViTEncoder
+from utils import load_data 
+from models import ViTEncoder, ResNetEncoder
 from utils import WildfireDataset
 from torch.utils.data import Subset
 from methods import Method, BasicCNN, ViT, BasicClustering
@@ -40,8 +40,21 @@ def main(args):
         )
 
         sessions.append(("clustering_vit", method))
+        
+    if method_name == "clustering_resnet" or method_name == "all":
+        encoder = ResNetEncoder(device=device)
+        method = BasicClustering(
+            encoder=encoder,
+            device=device,
+            method=args.clustering_algo, 
+            nb_cluster=args.nb_clusters
+        )
+
+        transform = None
+        sessions.append(("clustering_resnet", method))
 
     train_df, valid_df, test_df = load_data(data_path, args.DEBUG, num_samples=num_samples)
+    
     
     for session in sessions:
 
@@ -64,7 +77,7 @@ if __name__ == '__main__':
         "--method",
         type=str,
         default=BasicCNN,
-        choices=["basic_cnn", "vit", "clustering_vit", "all"],
+        choices=["basic_cnn", "vit", "clustering_vit", "clustering_resnet", "all"],
         help="Method to run"
     )
     parser.add_argument(
