@@ -1,23 +1,27 @@
+import os
 import torch
+import random
+import argparse
 
 from pathlib import Path
 from torchvision.transforms import v2
 from torch.utils.data import DataLoader
 
-from methods import BasicCNN, ViT, ViTUnsupervised
 from utils import WildfireDataset
+from torch.utils.data import Subset
 from utils import split_val_dataset
-import os
+from models import ViTEncoder
+from methods import Method, BasicCNN, ViT, BasicClustering
 
-def main_supervised():
-    method_name = "vit"
 
-    # variables #
-    batchsize = 10
-    data_folder = Path("./data/valid")
+def main(args):
+    method_name = args.method
+    data_path = Path(args.data_path)
     device = torch.device('cuda' if torch.cuda.is_available() else 'mps' if torch.mps.is_available() else 'cpu')
 
-    if method_name == "basic_cnn":
+    sessions = []
+
+    if method_name == "basic_cnn" or method_name == "all":
         method = BasicCNN(device=device)
 
         transform = v2.Compose([
@@ -25,8 +29,11 @@ def main_supervised():
             v2.ToDtype(torch.float32, scale=True)
         ])
 
-    elif method_name == "vit":
-        method = ViT(device=device)
+        sessions.append(("basic_cnn", method, transform))
+
+    if method_name == "vit" or method_name == "all":
+        nb_epochs = 1 if args.DEBUG else 50
+        method = ViT(device=device, nb_epochs=nb_epochs, batch_size=50, learning_rate=1e-2)
 
         feature_extractor_ = method.feature_extractor
         transform = v2.Compose([
@@ -38,83 +45,69 @@ def main_supervised():
                 std=torch.tensor(feature_extractor_.image_std, dtype=torch.float32).tolist()
             ),  # Normalize with float32
         ])
-    #############
 
+        sessions.append(("vit", method, transform))
 
-    train, test = split_val_dataset(data_folder)
+    if method_name == "clustering_vit" or method_name == "all":
+        encoder = ViTEncoder(device=device)
+        method = BasicClustering(
+            encoder=encoder,
+            device=device,
+            method=args.clustering_algo,
+            nb_cluster=args.nb_clusters
+        )
 
-    train_dataset = WildfireDataset(train, transform)
-    test_dataset = WildfireDataset(test, transform)
+        transform = None
 
-    ####### METHOD #######
-    import random
-    from torch.utils.data import Subset
-    fraction = 0.02
-    train_indices = random.sample(range(len(train_dataset)), int(len(train_dataset)*fraction))
-    test_indices = random.sample(range(len(test_dataset)), int(len(test_dataset)*fraction))
-    train_subset = Subset(train_dataset, train_indices)
-    test_subset = Subset(test_dataset, test_indices)
-    method.train_and_test(train_subset, test_subset, nb_epochs=50, batch_size=50, learning_rate=1e-2)
-    method.save()
+        sessions.append(("clustering_vit", method, transform))
 
-def main_unsupervised():
-    method_name = "vit"
+    train, test = split_val_dataset(data_path, args.DEBUG)
+    
+    for session in sessions:
 
-    # variables #
-    data_folder = Path("./data/valid")
-    nb_cluster = 2
-    clustering_method = "kmeans" #dbscan #kmeans
-    device = torch.device('cuda' if torch.cuda.is_available() else 'mps' if torch.mps.is_available() else 'cpu')
+        method_name: str = session[0]
+        method: Method = session[1]
+        transform: v2.Compose = session[2]
 
-    if method_name == "basic_cnn":
-        method = BasicCNN(device=device)
+        print(f"\033[32m\n>>>>>>>>>> {method_name} <<<<<<<<<<\n\033[0m")
 
-        transform = v2.Compose([
-            v2.ToImage(), # Convert into Image tensor
-            v2.ToDtype(torch.float32, scale=True)
-        ])
+        train_dataset = WildfireDataset(train, transform)
+        test_dataset = WildfireDataset(test, transform)
 
-    elif method_name == "vit":
-        method = ViTUnsupervised(device=device)
-
-        # Get embeddings of images
-        embeddings = method.extract_embeddings_from_folder(folder_path=data_folder)
-
-        # Clustering
-        labels_kmeans = method.cluster_embeddings(embeddings=embeddings, method="kmeans", nb_cluster=nb_cluster)
-        print(f"labels kmean: {labels_kmeans}")
-
-        image_paths = []
-        true_labels = []
-        for subfolder in ['nowildfire', 'wildfire']:
-            subfolder_path = os.path.join(data_folder, subfolder)
-            
-            for img in os.listdir(subfolder_path):
-                if img.endswith(('png', 'jpg', 'jpeg')):
-                    image_path = os.path.join(subfolder, img)
-                    image_paths.append(image_path)
-                    true_labels.append(1 if subfolder == "wildfire" else 0)
-
-        # Map each image to its corresponding cluster label
-        correct_predictions = 0
-        for img_path, true_label, predicted_label in zip(image_paths, true_labels, labels_kmeans):
-            if true_label == predicted_label:
-                correct_predictions += 1
-        # for img_path, label in zip(image_paths, labels_kmeans):
-        #     print(f"Image: {img_path} -> Cluster: {label}")
-        # Compute accuracy
-        accuracy = correct_predictions / len(image_paths)
-        print(f"Accuracy: {accuracy * 100:.2f}%")
-
-
-def main():
-    supervised = False
-
-    if supervised:
-        main_supervised()
-    else:
-        main_unsupervised()
+        method.run(train_dataset, test_dataset)
+        method.save()
 
 
 if __name__ == '__main__':
-    main()
+
+    parser = argparse.ArgumentParser()
+
+    parser.add_argument("--DEBUG", action="store_true")
+    parser.add_argument(
+        "--method",
+        type=str,
+        default=BasicCNN,
+        choices=["basic_cnn", "vit", "clustering_vit", "all"],
+        help="Method to run"
+    )
+    parser.add_argument(
+        "--data_path",
+        type=str,
+        default="./data/valid",
+    )
+    parser.add_argument(
+        "--nb_clusters",
+        type=int,
+        default=2,
+        help="Number of clusters to use if the clustering method is chosen and kmeans is the clustering algo."
+    )
+    parser.add_argument(
+        "--clustering_algo",
+        default="kmeans",
+        choices=["kmeans", "dbscan"],
+        help="Algo to run if the clustering method is chosen."
+    )
+
+    args = parser.parse_args()
+
+    main(args)

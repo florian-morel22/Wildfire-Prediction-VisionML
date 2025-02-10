@@ -1,39 +1,45 @@
+import torch
 import pandas as pd
 
 from PIL import Image
 from pathlib import Path
+from matplotlib import pyplot as plt
+from torchvision.transforms import v2
+from torch.utils.data import DataLoader
+from sklearn.metrics import accuracy_score
 from sklearn.model_selection import train_test_split
 from torchvision.datasets.vision import VisionDataset
-from matplotlib import pyplot as plt
-import torch
 from torchvision.transforms.functional import to_pil_image
-from torch.utils.data import DataLoader
-from torchvision.transforms import v2
 
 class WildfireDataset(VisionDataset):
     
     def __init__(self, dataframe: pd.DataFrame, transform=None):
-        self.filenames = dataframe["file"].reset_index(drop=True)
-        self.labels = dataframe["label"].reset_index(drop=True)
+        self.dataframe = dataframe
+        self.filenames = self.dataframe["file"].reset_index(drop=True)
+        self.labels = self.dataframe["label"].reset_index(drop=True)
         self.transform = transform
 
-    def __getitem__(self, index: int):
+    def __getitem__(self, index: int) -> dict:
         img_path = self.filenames[index]
         try:
             X = Image.open(img_path).convert("RGB")
         except Exception as e:
             raise RuntimeError(f"Error loading image {img_path}: {e}")
 
-        target = self.labels[index]
+        target: int = self.labels[index]
 
         if self.transform:
             X = self.transform(X)
 
-        # Ensure compatibile with mps
-        X = X.to(torch.float32) 
-        target = torch.tensor(target, dtype=torch.int32)
+        return X, target
 
-        return {"pixel_values": X, "labels": target}
+    def __len__(self):
+        return len(self.filenames)
+    
+    def __iter__(self):
+        for i in range(len(self.filenames)):
+            yield self.__getitem__(i)
+
     
     def __showitem__(self, index: int, mean=None, std=None):
 
@@ -94,6 +100,25 @@ class WildfireDataset(VisionDataset):
             plt.axis("off")
         plt.show()
 
+    def __dataloader__(self, batchsize=10, num_workers=4) -> DataLoader:
+        return DataLoader(self, batch_size=batchsize, shuffle=True, num_workers=num_workers)
+
+class WildfireDataset_ViT(WildfireDataset):
+    
+    def __init__(self, dataset: WildfireDataset):
+        super().__init__(dataset.dataframe, dataset.transform)
+        self.dataset = dataset
+
+    def __getitem__(self, index: int) -> dict:
+
+        img = self.dataset[index][0]
+        target = self.dataset[index][1]
+
+        target = [1, 0] if target==0 else [0, 1]
+        target = torch.tensor(target, dtype=torch.float32)
+
+        return {"pixel_values": img, "labels": target}
+
         
     def __len__(self):
         return len(self.filenames)
@@ -103,10 +128,14 @@ class WildfireDataset(VisionDataset):
 
 
 
-def split_val_dataset(data_folder: Path) -> tuple[pd.DataFrame, pd.DataFrame]:
+def split_val_dataset(data_folder: Path, debug: bool=False) -> tuple[pd.DataFrame, pd.DataFrame]:
 
     nowildfire_files = [file for file in (data_folder / "nowildfire").iterdir() if file.is_file()]
     wildfire_files = [file for file in (data_folder / "wildfire").iterdir() if file.is_file()]
+
+    if debug:
+        nowildfire_files = nowildfire_files[:5]
+        wildfire_files = wildfire_files[:5]
 
     fulldataset = pd.DataFrame([
         {
@@ -126,9 +155,11 @@ def split_val_dataset(data_folder: Path) -> tuple[pd.DataFrame, pd.DataFrame]:
 
     return train, valid
 
+
 def compute_metrics(pred):
-    from sklearn.metrics import accuracy_score
-    labels = pred.label_ids
+
+    labels = pred.label_ids.argmax(-1)
     preds = pred.predictions.argmax(-1)
+
     acc = accuracy_score(labels, preds)
     return {"accuracy": acc}
