@@ -5,7 +5,9 @@ import torch.optim as optim
 import pandas as pd
 
 from tqdm import tqdm
+from dotenv import load_dotenv
 from utils import load_data
+from datasets import load_dataset, Dataset
 from utils import WildfireDataset
 from torchvision.transforms import v2
 from torch.utils.data import DataLoader
@@ -24,6 +26,9 @@ from abc import abstractmethod
 import numpy as np
 from sklearn.cluster import KMeans, DBSCAN
 
+load_dotenv()
+
+HF_TOKEN = os.environ.get("HF_TOKEN")
 
 
 class Method():
@@ -47,8 +52,8 @@ class BasicCNN():
             network: nn.Module = None,
             device: str = "cpu",
             nb_epochs: int = 7,
-            batch_size: int = 50,
-            learning_rate: float = 1e-2
+            batch_size: int = 32,
+            learning_rate: float = 1e-3
             ):
 
         self.device = device
@@ -64,7 +69,6 @@ class BasicCNN():
         self.scheduler = optim.lr_scheduler.ReduceLROnPlateau(self.optimizer, mode='min', factor=0.1, patience=5)
         self.criterion = nn.BCEWithLogitsLoss()
 
-
     def process_data(
             self,
             train_df: pd.DataFrame,
@@ -79,7 +83,7 @@ class BasicCNN():
         ])
 
         if not use_train_data:
-            train_df, valid_df = train_test_split(valid_df, test_size=0.2) #split valid in new train/valid
+            train_df, valid_df = train_test_split(valid_df, test_size=0.2, shuffle=True, random_state=42) #split valid in new train/valid
 
         self.train_dataset = WildfireDataset(train_df, transform)
         self.val_dataset = WildfireDataset(valid_df, transform)
@@ -87,7 +91,7 @@ class BasicCNN():
 
         print(f">> train dataset : {len(self.train_dataset)} rows.")
         print(f">> validation dataset : {len(self.val_dataset)} rows.")
-        print(f">> test dataset : {len(self.test_dataset)} rows.")
+        print(f">> test dataset : {len(self.test_dataset)} rows.\n")
 
     def train(self, debug: bool=False) -> None:
         
@@ -363,7 +367,7 @@ class BasicClustering():
         
         transform = None
 
-        self.train_dataset = WildfireDataset(valid_df, transform)
+        self.train_dataset = WildfireDataset(valid_df.sample(frac=1, random_state=42), transform)
         self.test_dataset = WildfireDataset(test_df, transform)
         
     def run(self, debug: bool=False):
@@ -410,8 +414,8 @@ class AdvancedClustering():
             device: str = "cpu",
             algo: str = "kmeans",
             nb_epochs: int = 7,
-            batch_size: int = 50,
-            learning_rate: float = 1e-3,
+            batch_size: int = 32,
+            learning_rate: float = 1e-4,
             network: nn.Module = None,
             **kwargs
     ):
@@ -439,7 +443,7 @@ class AdvancedClustering():
         
         transform = None
 
-        valid_train_df, valid_valid_df = train_test_split(valid_df, test_size=0.2) #split valid in new train/valid
+        valid_train_df, valid_valid_df = train_test_split(valid_df, test_size=0.2, shuffle=True, random_state=42) #split valid in new train/valid
 
         self.train_dataset = WildfireDataset(pd.concat([train_df, valid_train_df]), transform)
         self.val_dataset = WildfireDataset(valid_valid_df, transform)
@@ -447,21 +451,48 @@ class AdvancedClustering():
 
         print(f">> train dataset : {len(self.train_dataset)} rows.")
         print(f">> validation dataset : {len(self.val_dataset)} rows.")
-        print(f">> test dataset : {len(self.test_dataset)} rows.")
+        print(f">> test dataset : {len(self.test_dataset)} rows.\n")
 
-    def generate_synthetic_annotation(self):
+    def load_data_from_hf(self):
+        """Load encoded images from the huggingface hub."""
+        try:
+            print(f">> Loading encoded images from the hub. (WARNING : ensure random state is 42 in the train_test_split() of process_data())")
+            dataset = load_dataset("florian-morel22/cvproject-vit-encoding", token=HF_TOKEN)
+            train_dataset: Dataset = dataset['train']
+            encoded_images = np.array([train_dataset[i]['image'] for i in range(train_dataset.shape[0])])
+            true_labels = np.array([train_dataset[i]['label'] for i in range(train_dataset.shape[0])])
 
-        encoded_images, true_labels = self.encoder.encode_images(self.train_dataset)
+        except Exception as e:
+            print(f">> Impossible to load the encoded images from the hub. ({e})")
+            encoded_images, true_labels = self.encoder.encode_images(self.train_dataset)
+            dataset = Dataset.from_dict({
+                "image": encoded_images,
+                "label": true_labels
+            })
+            print(">> Push the encoded images dataset to the hub.")
+            dataset.push_to_hub("florian-morel22/cvproject-vit-encoding", token=HF_TOKEN, private=False)
+        
+        print("")
+        return encoded_images, true_labels
+
+    def generate_synthetic_annotation(self, load_from_hf: bool=False):
+
+        if load_from_hf:
+            encoded_images, true_labels = self.load_data_from_hf()
+        else:
+            encoded_images, true_labels = self.encoder.encode_images(self.train_dataset)
+
+        # Clustering_algo
 
         if self.algo == "kmeans":
             n_clusters = self.kwargs.get("n_clusters", 2)
-            print(f"Clustering with K-Means (n_clusters={n_clusters})")
+            print(f">> Clustering with K-Means (n_clusters={n_clusters})")
             self.clustering_model = KMeans(n_clusters=n_clusters, random_state=42)
         
         elif self.algo == "dbscan":
             eps = self.kwargs.get("eps", 0.5)
             min_samples = self.kwargs.get("min_samples", 5)
-            print(f"Clustering with DBSCAN (eps={eps}, min_samples={min_samples})")
+            print(f">> Clustering with DBSCAN (eps={eps}, min_samples={min_samples})")
             self.clustering_model = DBSCAN(eps=eps, min_samples=min_samples)
 
         else:
@@ -477,9 +508,8 @@ class AdvancedClustering():
                 self.train_dataset.update_label(i, new_label)
 
     def run(self, debug: bool=False):
-        self.generate_synthetic_annotation()
+        self.generate_synthetic_annotation(load_from_hf=True if not debug else False)
 
-        print(" ")
         self.sub_method.process_data(
             self.train_dataset.dataframe,
             self.val_dataset.dataframe,
@@ -500,18 +530,26 @@ class AdvancedClustering():
 
         cluster2label: dict = {}
 
+        print("Cluster | label | % of labeled data | Label homogeneity | Nb of data")
+        print("=========================================================================")
+
         for cluster in range(n_clusters):
             cluster_labels: np.ndarray = true_labels[(predicted_clusters==cluster) & (true_labels!=-1)]
             cluster_labels = cluster_labels.astype(np.int32)
 
-            if np.any(cluster_labels): # cluster_labels not empty
+            if cluster_labels.size > 0: # cluster_labels not empty
 
                 count_labels = np.bincount(cluster_labels)
-                print(f" >> Homogeneity cluster {cluster} : {round(max(count_labels)/sum(count_labels) *100, 2)} %")
-                
+                label_homogeneity = max(count_labels)/sum(count_labels) *100
+                nb_data = sum(predicted_clusters==cluster)
+                nb_labeled_data = sum((predicted_clusters==cluster) & (true_labels!=-1))
+                print(f"{cluster : 03d}     | {np.argmax(count_labels): 02d}    | {nb_labeled_data/nb_data*100 :.2f} %           | {label_homogeneity :.2f} %           | {nb_data}")
+
+
                 cluster2label[cluster] = np.argmax(count_labels)
             else:
                 print(f"WARNING : cluster {cluster} has no labled data.")
                 cluster2label[cluster] = 1 # randomly assigned
         
+        print("")
         return cluster2label

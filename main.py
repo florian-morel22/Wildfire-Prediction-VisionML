@@ -17,7 +17,7 @@ def main(args):
     sessions = []
 
     if method_name == "basic_cnn" or method_name == "all":
-        method = BasicCNN(device=device)
+        method = BasicCNN(device=device, batch_size=32)
         sessions.append(("basic_cnn", method))
 
     if method_name == "vit" or method_name == "all":
@@ -41,7 +41,7 @@ def main(args):
             encoder=encoder,
             device=device,
             method=args.clustering_algo, 
-            nb_cluster=args.n_clusters
+            n_cluster=args.n_clusters
         )
 
         sessions.append(("clustering_resnet", method))
@@ -52,7 +52,8 @@ def main(args):
             encoder=encoder,
             device=device,
             algo=args.clustering_algo,
-            n_clusters=args.n_clusters
+            n_clusters=args.n_clusters,
+            batch_size=32,
         )
         
         sessions.append(("advanced_clustering", method))

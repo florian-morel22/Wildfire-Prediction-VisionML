@@ -190,9 +190,6 @@ def load_data(data_folder: Path, debug: bool=False, num_samples: int=5) -> tuple
         for file in test_wildfire_files
     ])
 
-    train_df = train_df.sample(frac=1)
-    valid_df = valid_df.sample(frac=1)
-
     if debug:
         train_df = train_df.iloc[:num_samples]
         valid_df = valid_df.iloc[:num_samples]
