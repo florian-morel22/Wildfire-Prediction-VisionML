@@ -11,8 +11,9 @@ from datasets import load_dataset, Dataset
 from utils import WildfireDataset
 from torchvision.transforms import v2
 from torch.utils.data import DataLoader
-from models import Net, ImageEncoder
+from models import Net, ImageEncoder, resnet_classifier
 from sklearn.model_selection import train_test_split
+from torchvision.models import resnet50
 
 # ViT
 from transformers import ViTImageProcessor, ViTForImageClassification, TrainingArguments, Trainer
@@ -63,8 +64,10 @@ class BasicCNN():
 
         if network is None:
             self.network = Net(num_classes=1)
-            self.network = self.network.to(self.device)
+        else:
+            self.network = network
 
+        self.network = self.network.to(self.device)
         self.optimizer = optim.SGD(self.network.parameters(), lr=0.01, momentum=0.9)
         self.scheduler = optim.lr_scheduler.ReduceLROnPlateau(self.optimizer, mode='min', factor=0.1, patience=5)
         self.criterion = nn.BCEWithLogitsLoss()
@@ -185,12 +188,123 @@ class BasicCNN():
             debug: bool=False
         ) -> None:
 
+        print(f">> Classifier : {type(self.network)}")
+
         self.train(debug)
         self.test()
 
     def save(self):
         """save the model, the loss plot..."""
         pass
+
+class SemiSupervisedCNN(BasicCNN):
+
+    def __init__(
+            self,
+            network: nn.Module = None,
+            device: str = "cpu",
+            nb_epochs: int = 7,
+            batch_size: int = 32,
+            learning_rate: float = 1e-3,
+            confidence_rate: float = 0.9
+            ):
+
+        super().__init__(
+            network,
+            device,
+            nb_epochs,
+            batch_size,
+            learning_rate
+        )
+
+        self.confidence_rate = confidence_rate
+
+    def process_data(
+            self,
+            train_df: pd.DataFrame,
+            valid_df: pd.DataFrame,
+            test_df: pd.DataFrame,
+        ) -> None:
+        
+        transform = v2.Compose([
+            v2.ToImage(), # Convert into Image tensor
+            v2.ToDtype(torch.float32, scale=True)
+        ])
+
+        valid_train_df, valid_valid_df = train_test_split(valid_df, test_size=0.2, shuffle=True, random_state=42) #split valid in new train/valid
+
+        self.train_dataset = WildfireDataset(pd.concat([train_df, valid_train_df]), transform)
+        self.val_dataset = WildfireDataset(valid_valid_df, transform)
+        self.test_dataset = WildfireDataset(test_df, transform)
+
+        print(f">> train dataset : {len(self.train_dataset)} rows.")
+        print(f">> validation dataset : {len(self.val_dataset)} rows.")
+        print(f">> test dataset : {len(self.test_dataset)} rows.\n")
+
+    def train(self, debug: bool=False) -> None:
+        
+        trainloader: DataLoader = DataLoader(self.train_dataset, self.batch_size, shuffle=True, num_workers=4)
+        valloader: DataLoader = DataLoader(self.val_dataset, self.batch_size, shuffle=False, num_workers=4)
+
+        print(">>> TRAIN")
+
+        nb_epochs = self.nb_epochs if not debug else 2
+        for epoch in range(nb_epochs):
+
+            ## TRAIN ##
+            self.network.train()
+            running_loss = 0.0
+            pbar = tqdm(enumerate(trainloader, 0), total=len(trainloader), desc=f"train")
+            for i, data in pbar:
+                inputs, labels = data
+
+                inputs = inputs.to(self.device)
+                labels = labels.to(self.device)
+
+                self.optimizer.zero_grad()
+
+                outputs = self.network(inputs)
+                print(outputs)
+
+                loss = self.criterion(outputs, labels.view(-1, 1))
+                loss.backward()
+                self.optimizer.step()
+
+                running_loss += loss.item()
+                pbar.set_postfix({'loss': running_loss/(i+1)}, refresh=True)
+
+            ## VALIDATION ##
+            with torch.no_grad():
+                    
+                self.network.eval()
+                val_loss = 0.0
+                correct = 0
+                total = 0
+
+                pbar = tqdm(enumerate(valloader, 0), total=len(valloader), desc=f"val")
+                for i, data in pbar:
+                    images, labels = data
+                    images, labels = images.to(self.device), labels.to(self.device)
+
+                    outputs = self.network(images)
+                    loss = self.criterion(outputs, labels.view(-1, 1))
+                    val_loss += loss.item()
+                    
+                    # Compute accuracy
+                    predicted = (torch.sigmoid(outputs) > 0.5).to(torch.float32)
+                    labels = labels.view_as(predicted)
+
+                    total += labels.size(0)
+                    correct += (predicted == labels).sum().item()
+
+            # Print statistics
+            train_loss = running_loss / len(trainloader)
+            val_loss /= len(valloader)
+            val_accuracy = 100 * correct / total
+
+            self.scheduler.step(val_loss)
+
+            print(f"Epoch [{epoch+1}/{self.nb_epochs}] - Train Loss: {train_loss:.4f} | Val Loss: {val_loss:.4f} | Val Accuracy: {val_accuracy:.2f}%")
 
 class ViT():
 
@@ -415,8 +529,8 @@ class AdvancedClustering():
             algo: str = "kmeans",
             nb_epochs: int = 7,
             batch_size: int = 32,
-            learning_rate: float = 1e-4,
-            network: nn.Module = None,
+            learning_rate: float = 0.01,
+            classifier: nn.Module = None,
             **kwargs
     ):
         self.device = device
@@ -425,7 +539,7 @@ class AdvancedClustering():
         self.algo = algo
 
         self.sub_method = BasicCNN(
-            network=network,
+            network=classifier,
             device=self.device,
             nb_epochs=nb_epochs,
             batch_size = batch_size,
@@ -480,6 +594,7 @@ class AdvancedClustering():
         if load_from_hf:
             encoded_images, true_labels = self.load_data_from_hf()
         else:
+            print(f">> Encoder : {type(self.encoder)}")
             encoded_images, true_labels = self.encoder.encode_images(self.train_dataset)
 
         # Clustering_algo

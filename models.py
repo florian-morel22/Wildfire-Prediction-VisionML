@@ -12,6 +12,7 @@ from torchvision.models import resnet50, ResNet50_Weights
 from transformers import ViTImageProcessor, ViTModel
 from transformers import SegformerForSemanticSegmentation, SegformerImageProcessor
 
+from torchvision.models import resnet50, ResNet
 
 # Abstract class
 class ImageEncoder():
@@ -58,6 +59,14 @@ class Net(nn.Module):
         x = self.fc2(x)
         
         return x
+
+
+def resnet_classifier(num_classes: int=2) -> ResNet:
+    model = resnet50(weights=ResNet50_Weights.DEFAULT)
+    num_features = model.fc.in_features
+    model.fc = nn.Linear(num_features, num_classes)
+
+    return model           
 
 
 class ViTEncoder(ImageEncoder):
@@ -133,8 +142,6 @@ class SegFormerEncoder(ImageEncoder):
 
         return encoded_image
 
-
-
   
 class ResNetEncoder:
     def __init__(self, model_name="resnet50", device="cpu"):
@@ -187,4 +194,4 @@ class ResNetEncoder:
             embeddings.append(embedding)
             labels.append(label.item())
 
-        return np.array(embeddings), np.array(labels)  
+        return np.array(embeddings), np.array(labels)

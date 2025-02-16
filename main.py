@@ -4,8 +4,8 @@ import argparse
 from pathlib import Path
 
 from utils import load_data 
-from models import ViTEncoder, ResNetEncoder, SegFormerEncoder
-from methods import Method, BasicCNN, ViT, BasicClustering, AdvancedClustering
+from models import ViTEncoder, ResNetEncoder, SegFormerEncoder, resnet_classifier
+from methods import Method, BasicCNN, ViT, BasicClustering, AdvancedClustering, SemiSupervisedCNN
 
 
 def main(args):
@@ -17,8 +17,13 @@ def main(args):
     sessions = []
 
     if method_name == "basic_cnn" or method_name == "all":
-        method = BasicCNN(device=device, batch_size=32)
+        classifier = resnet_classifier(num_classes=1)
+        method = BasicCNN(device=device, batch_size=32, network=classifier)
         sessions.append(("basic_cnn", method))
+
+    if method_name == "semisupervised_cnn" or method_name == "all":
+        method = SemiSupervisedCNN(device=device, batch_size=1)
+        sessions.append(("semisupervised_cnn", method))
 
     if method_name == "vit" or method_name == "all":
         method = ViT(device=device, nb_epochs=50, batch_size=50, learning_rate=1e-2)
@@ -48,9 +53,11 @@ def main(args):
     
     if method_name == "advanced_clustering" or method_name == "all":
         encoder = ViTEncoder(device=device)
+        classifier = resnet_classifier(num_classes=1)
         method = AdvancedClustering(
             encoder=encoder,
             device=device,
+            classifier=classifier,
             algo=args.clustering_algo,
             n_clusters=args.n_clusters,
             batch_size=32,
