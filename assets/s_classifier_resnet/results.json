@@ -1,0 +1,1 @@
+{"train": [{"epoch": 1, "train_loss": 0.6997541234103175, "val_loss": 0.6570986525330227, "val_accuracy": 76.0}, {"epoch": 2, "train_loss": 0.6377017196881263, "val_loss": 0.5943019523256226, "val_accuracy": 96.0}], "test": {"accuracy": 93.4, "confusion_matrix": [[1]]}, "params": {"learning_rate": 1e-05, "batchsize": 32}}

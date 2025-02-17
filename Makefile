@@ -1,10 +1,23 @@
-
-
-PART=ENSTA-h100 #ENSTA-h100 #ENSTA-l40s
+PART=ENSTA-l40s #ENSTA-h100 #ENSTA-l40s
 TIME=00:30:00
 
 DATA_PATH="./data"
-METHOD="advanced_clustering" #vit #basic_cnn #clustering_vit #all #advanced_clustering #advanced_clustering1
+METHOD="s_classifier_resnet"
+
+## Supervised Methods ##
+#s_classifier_resnet
+#s_vit
+
+## Semi-Supervised Methods ##
+#ss_selftraining_resnet
+#ss_clustering_vit_resnet
+#ss_clustering_segformer_net
+
+## Unsupervised Methods ##
+#us_clustering_vit
+#us_clustering_resnet_net
+
+#all
 
 N_CLUSTERS=4
 CLUSTERING_ALGO="kmeans"
@@ -13,7 +26,7 @@ PARAMS = --data_path=$(DATA_PATH)\
 	--n_clusters=$(N_CLUSTERS)\
 	--clustering_algo=$(CLUSTERING_ALGO)
 	
-NUM_SAMPLES = 300
+NUM_SAMPLES = 500
 
 setup: download_dataset
 

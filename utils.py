@@ -41,7 +41,6 @@ class WildfireDataset(VisionDataset):
         try:
             X = Image.open(img_path).convert("RGB")
         except Exception as e:
-            # raise RuntimeError(f"Error loading image {img_path}: {e}")
             print(f"⚠️ Image corrompue ignorée: {img_path} ({e})")
             return None
 
@@ -51,9 +50,9 @@ class WildfireDataset(VisionDataset):
         if self.target_transform:
             target = self.target_transform(target)
 
-        if self.method_name == "vit":
+        if self.method_name == "s_vit":
             return {"pixel_values": X, "labels": target}
-        elif self.method_name == "semisupervised_cnn":
+        elif self.method_name == "ss_selftraining":
             return X, target, index
         else:
             return X, target
@@ -159,7 +158,7 @@ def load_data(data_folder: Path, debug: bool=False, num_samples: int=5) -> tuple
     train_df = pd.DataFrame([
         {
             "file": file,
-            "label": -1.
+            "label": -1. #Unknown label
         }
         for file in train_nowildfire_files + train_wildfire_files
     ])
@@ -198,7 +197,6 @@ def load_data(data_folder: Path, debug: bool=False, num_samples: int=5) -> tuple
         test_df = test_df.iloc[:num_samples]
 
     return train_df, valid_df, test_df
-
 
 def compute_metrics(pred):
 

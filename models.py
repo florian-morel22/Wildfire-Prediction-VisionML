@@ -6,13 +6,13 @@ import torch.nn.functional as F
 from PIL import Image
 from tqdm import tqdm
 from abc import abstractmethod
-import torchvision.transforms as transforms
 from torch.utils.data import Dataset 
-from torchvision.models import resnet50, ResNet50_Weights
+import torchvision.transforms as transforms
+from torchvision.models import resnet50, ResNet
 from transformers import ViTImageProcessor, ViTModel
+from torchvision.models import resnet50, ResNet50_Weights
 from transformers import SegformerForSemanticSegmentation, SegformerImageProcessor
 
-from torchvision.models import resnet50, ResNet
 
 # Abstract class
 class ImageEncoder():
@@ -32,6 +32,7 @@ class ImageEncoder():
 
         return np.array(embeddings), np.array(labels)
 
+# Classifiers
 class Net(nn.Module):
     def __init__(self, num_classes=1):
         super().__init__()
@@ -60,7 +61,6 @@ class Net(nn.Module):
         
         return x
 
-
 def resnet_classifier(num_classes: int=2) -> ResNet:
     model = resnet50(weights=ResNet50_Weights.DEFAULT)
     num_features = model.fc.in_features
@@ -68,7 +68,7 @@ def resnet_classifier(num_classes: int=2) -> ResNet:
 
     return model           
 
-
+# Encoders
 class ViTEncoder(ImageEncoder):
 
     def __init__(
@@ -81,7 +81,6 @@ class ViTEncoder(ImageEncoder):
         The model extracts embeddings instead of performing classification.
         """
         self.device = device
-        print(f"Using device: {device}")
         
         # Load the feature extractor and the base ViT model (without classification head)
         self.feature_extractor = ViTImageProcessor.from_pretrained(model_name)
@@ -107,7 +106,6 @@ class ViTEncoder(ImageEncoder):
         embedding = outputs.last_hidden_state[:, 0, :].squeeze(0).cpu().numpy()
         return embedding
 
-  
 class SegFormerEncoder(ImageEncoder):
 
     def __init__(
@@ -120,7 +118,6 @@ class SegFormerEncoder(ImageEncoder):
         The model extracts embeddings instead of performing classification.
         """
         self.device = device
-        print(f"Using device: {device}")
         
         self.model_name = model_name
         self.processor = SegformerImageProcessor.from_pretrained("nvidia/segformer-b0-finetuned-ade-512-512")
@@ -141,16 +138,14 @@ class SegFormerEncoder(ImageEncoder):
         encoded_image = np.array([(predicted_mask_np==i).sum() for i in range(self.num_class)])
 
         return encoded_image
-
-  
-class ResNetEncoder:
+ 
+class ResNetEncoder(ImageEncoder):
     def __init__(self, model_name="resnet50", device="cpu"):
         """
         Initialize ResNet for unsupervised tasks.
         The model extracts embeddings instead of performing classification.
         """
         self.device = device
-        print(f"Using device: {device}")
 
         # Charger ResNet50 sans la dernière couche (FC layer)
         self.model = resnet50(weights=ResNet50_Weights.DEFAULT)
