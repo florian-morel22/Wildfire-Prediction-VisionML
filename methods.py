@@ -68,7 +68,7 @@ class BasicCNN():
             self.network = network
 
         self.network = self.network.to(self.device)
-        self.optimizer = optim.SGD(self.network.parameters(), lr=0.01, momentum=0.9)
+        self.optimizer = optim.Adam(self.network.parameters(), lr=self.learning_rate)
         self.scheduler = optim.lr_scheduler.ReduceLROnPlateau(self.optimizer, mode='min', factor=0.1, patience=5)
         self.criterion = nn.BCEWithLogitsLoss()
 
@@ -119,6 +119,14 @@ class BasicCNN():
                 self.optimizer.zero_grad()
 
                 outputs = self.network(inputs)
+
+                # ## TODELETE ##
+                # sigm_outputs = nn.functional.sigmoid(outputs)
+                # print(min(sigm_outputs))
+                # print(max(sigm_outputs))
+                # ##############
+
+
                 loss = self.criterion(outputs, labels.view(-1, 1))
                 loss.backward()
                 self.optimizer.step()
@@ -197,7 +205,7 @@ class BasicCNN():
         """save the model, the loss plot..."""
         pass
 
-class SemiSupervisedCNN(BasicCNN):
+class SemiSupervisedCNN_DEPRECATED(BasicCNN):
 
     def __init__(
             self,
@@ -206,7 +214,7 @@ class SemiSupervisedCNN(BasicCNN):
             nb_epochs: int = 7,
             batch_size: int = 32,
             learning_rate: float = 1e-3,
-            confidence_rate: float = 0.9
+            confidence_rate: float = 0.8
             ):
 
         super().__init__(
@@ -214,7 +222,14 @@ class SemiSupervisedCNN(BasicCNN):
             device,
             nb_epochs,
             batch_size,
-            learning_rate
+            learning_rate,
+            nn.BCEWithLogitsLoss(reduction='sum') # reduction = sum bc only a fraction of the batch can be loss computed
+        )
+
+        self.pretraining_method = BasicCNN(
+            device=self.device,
+            nb_epochs=3,
+            network=network,
         )
 
         self.confidence_rate = confidence_rate
@@ -231,15 +246,48 @@ class SemiSupervisedCNN(BasicCNN):
             v2.ToDtype(torch.float32, scale=True)
         ])
 
-        valid_train_df, valid_valid_df = train_test_split(valid_df, test_size=0.2, shuffle=True, random_state=42) #split valid in new train/valid
+        # For pretraining
 
-        self.train_dataset = WildfireDataset(pd.concat([train_df, valid_train_df]), transform)
+        print(">>>>  Pre Training :")
+        self.pretraining_method.process_data(train_df, valid_df, test_df)
+
+        # For FineTuning
+
+        valid_train_df, valid_valid_df = train_test_split(valid_df, test_size=0.2, shuffle=True, random_state=42) 
+
+        self.train_dataset = WildfireDataset(pd.concat([train_df, valid_train_df]), transform, method_name="semisupervised_cnn")
         self.val_dataset = WildfireDataset(valid_valid_df, transform)
         self.test_dataset = WildfireDataset(test_df, transform)
 
+        print(">>>>  Fine Tuning :")
         print(f">> train dataset : {len(self.train_dataset)} rows.")
         print(f">> validation dataset : {len(self.val_dataset)} rows.")
         print(f">> test dataset : {len(self.test_dataset)} rows.\n")
+
+    def update_labels(
+            self,
+            outputs: torch.Tensor,
+            labels: torch.Tensor,
+            indexs: torch.Tensor
+        ) -> tuple[torch.Tensor, torch.Tensor]:
+        """
+        Update labels of unlabeled data with high confidence in the prediction.
+        Remove still unlabled data to compute the loss.
+        """
+        
+        sigm_outputs = torch.nn.functional.sigmoid(outputs)
+
+        #index of UNLABELED data predicted with a HIGH CONFIDENCE (> confidence_rate)
+        idxs = torch.argwhere((labels==-1) & (abs((sigm_outputs-0.5)*2)>=self.confidence_rate))
+        binary_preds =  (sigm_outputs > 0.5).to(torch.float32)
+
+        for idx in idxs:
+            self.train_dataset.update_label(indexs[idx].item(), binary_preds[idx].item())
+
+        filtered_labels = labels[labels!=-1]
+        filtered_outputs = outputs[labels!=-1]
+
+        return filtered_outputs, filtered_labels
 
     def train(self, debug: bool=False) -> None:
         
@@ -248,30 +296,35 @@ class SemiSupervisedCNN(BasicCNN):
 
         print(">>> TRAIN")
 
-        nb_epochs = self.nb_epochs if not debug else 2
+        nb_epochs = self.nb_epochs if not debug else 7
+        
         for epoch in range(nb_epochs):
 
             ## TRAIN ##
             self.network.train()
             running_loss = 0.0
+            nb_computed_samples = 0 # Different from len(trainloader) at the end of the epoch
             pbar = tqdm(enumerate(trainloader, 0), total=len(trainloader), desc=f"train")
             for i, data in pbar:
-                inputs, labels = data
+                inputs, labels, indexs = data
 
-                inputs = inputs.to(self.device)
-                labels = labels.to(self.device)
+                inputs = inputs.to(torch.float32).to(self.device)
+                labels = labels.to(torch.float32).to(self.device)
+                indexs = indexs.to(torch.float32).to(self.device)
 
                 self.optimizer.zero_grad()
 
-                outputs = self.network(inputs)
-                print(outputs)
-
-                loss = self.criterion(outputs, labels.view(-1, 1))
+                outputs = self.network(inputs) # 1x32
+                
+                outputs, labels = self.update_labels(outputs.flatten(), labels, indexs)
+                
+                loss = self.criterion(outputs, labels)
                 loss.backward()
                 self.optimizer.step()
 
                 running_loss += loss.item()
-                pbar.set_postfix({'loss': running_loss/(i+1)}, refresh=True)
+                nb_computed_samples += outputs.shape[0]
+                pbar.set_postfix({'loss': running_loss/nb_computed_samples if nb_computed_samples>0 else None}, refresh=True)
 
             ## VALIDATION ##
             with torch.no_grad():
@@ -287,7 +340,7 @@ class SemiSupervisedCNN(BasicCNN):
                     images, labels = images.to(self.device), labels.to(self.device)
 
                     outputs = self.network(images)
-                    loss = self.criterion(outputs, labels.view(-1, 1))
+                    loss = self.criterion(outputs.flatten(), labels)
                     val_loss += loss.item()
                     
                     # Compute accuracy
@@ -298,13 +351,192 @@ class SemiSupervisedCNN(BasicCNN):
                     correct += (predicted == labels).sum().item()
 
             # Print statistics
-            train_loss = running_loss / len(trainloader)
-            val_loss /= len(valloader)
+            train_loss = running_loss / nb_computed_samples
+            val_loss /= len(valloader)*self.batch_size
             val_accuracy = 100 * correct / total
 
             self.scheduler.step(val_loss)
 
-            print(f"Epoch [{epoch+1}/{self.nb_epochs}] - Train Loss: {train_loss:.4f} | Val Loss: {val_loss:.4f} | Val Accuracy: {val_accuracy:.2f}%")
+            lbls = self.train_dataset.dataframe["label"].value_counts()
+
+            print(f"Epoch [{epoch+1}/{self.nb_epochs}] - Train Loss: {train_loss:.4f} | Val Loss: {val_loss:.4f} | Val Accuracy: {val_accuracy:.2f}% | perc. labeled images: {lbls[lbls.index!=-1].sum()/lbls.sum()*100:.2f}%")
+
+    def run(self, debug: bool=False):
+
+        print(">>>>> \033[33mPRE TRAINING\033[0m")
+        self.pretraining_method.train(debug)
+        # Retrieve the pretrained model 
+        self.network = self.pretraining_method.network
+
+        print("\n>>>>> \033[33mFINE TUNING\033[0m")
+        self.train(debug)
+        self.test()
+
+class SemiSupervisedCNN():
+
+    def __init__(
+            self,
+            network: nn.Module = None,
+            device: str = "cpu",
+            nb_epochs: int = 5,
+            batch_size: int = 32,
+            learning_rate: float = 1e-3,
+            confidence_rate: float = 0.85,
+            max_pseudo_label: int = 500, # Maximum number of samples to pseudo label?
+            steps: int = 5
+            ):
+        
+        self.network = network
+        self.device = device
+        self.nb_epochs = nb_epochs
+        self.batch_size = batch_size
+        self.learning_rate = learning_rate
+        self.confidence_rate = confidence_rate
+        self.max_pseudo_label = max_pseudo_label
+        self.steps = steps
+
+    def process_data(
+            self,
+            train_df: pd.DataFrame,
+            valid_df: pd.DataFrame,
+            test_df: pd.DataFrame,
+        ) -> None:
+        
+        self.transform = v2.Compose([
+            v2.ToImage(), # Convert into Image tensor
+            v2.ToDtype(torch.float32, scale=True)
+        ])
+
+        valid_train_df, valid_valid_df = train_test_split(valid_df, test_size=0.2, shuffle=True, random_state=42) #split valid in new train/valid
+
+        self.unlabeled_dataset = WildfireDataset(train_df, self.transform, method_name="semisupervised_cnn")
+        self.train_dataset = WildfireDataset(valid_train_df, self.transform)
+        self.val_dataset = WildfireDataset(valid_valid_df, self.transform)
+        self.test_dataset = WildfireDataset(test_df, self.transform)
+
+        print(f">> unlabeled_dataset : {len(self.unlabeled_dataset)} rows.")
+        print(f">> train dataset : {len(self.train_dataset)} rows.")
+        print(f">> validation dataset : {len(self.val_dataset)} rows.")
+        print(f">> test dataset : {len(self.test_dataset)} rows.\n")
+
+    def update_labels(self, trained_network: nn.Module):
+
+        unlabeledloader = DataLoader(self.unlabeled_dataset, batch_size=self.batch_size, num_workers=4)
+
+        with torch.no_grad():
+                
+            trained_network.eval()
+            results = []
+
+            pbar = tqdm(enumerate(unlabeledloader, 0), total=len(unlabeledloader), desc=f"unlabeled")
+            for _, data in pbar:
+                images, labels, indexs = data
+                images = images.to(torch.float32).to(self.device)
+                labels = labels.to(torch.float32).to(self.device)
+
+                outputs = trained_network(images)
+                sigm_outputs = nn.functional.sigmoid(outputs)
+
+                for idx, out in zip(indexs, sigm_outputs):
+                    results.append({
+                        "index": idx.item(),
+                        "pseudo_label": int((out > 0.5).cpu().item()),
+                        "confidence": abs((out - 0.5)*2).cpu().item()
+                    })
+
+        results_df = pd.DataFrame(results)
+        
+        high_confident: pd.DataFrame = results_df[results_df["confidence"]> self.confidence_rate]
+        
+        # We want to add 50% label 0, 50% label 1
+        high_confident_label0 = high_confident[high_confident["pseudo_label"]==0]
+        high_confident_label0 = high_confident_label0.sort_values("confidence", ascending=False)
+        high_confident_label0 = high_confident_label0[:self.max_pseudo_label//2]
+        
+        high_confident_label1 = high_confident[high_confident["pseudo_label"]==1]
+        high_confident_label1 = high_confident_label1.sort_values("confidence", ascending=False)
+        high_confident_label1 = high_confident_label1[:self.max_pseudo_label//2]
+
+        high_confident = pd.concat([high_confident_label0, high_confident_label1])
+
+        for _, row in high_confident.iterrows():
+            self.unlabeled_dataset.update_label(row["index"], row["pseudo_label"])
+
+        train_df = self.train_dataset.dataframe
+        unlabeled_df = self.unlabeled_dataset.dataframe
+        pseudolabeled_df = unlabeled_df[unlabeled_df["label"]!=-1]
+        unlabeled_df = unlabeled_df[unlabeled_df["label"]==-1]
+
+        # print stats on newly generated pseudo labels
+        new_labels = pseudolabeled_df["label"].value_counts()
+        new_labels_0 = new_labels[0] if 0 in new_labels.index else 0
+        new_labels_1 = new_labels[1] if 1 in new_labels.index else 0
+        print(f">> Newly generated 0 pseudo labels : {new_labels_0} ({new_labels_0/new_labels.sum()*100:0.2f} %)")
+        print(f">> Newly generated 1 pseudo labels : {new_labels_1} ({new_labels_1/new_labels.sum()*100:0.2f} %)")
+
+        # Update train_dataset and unlabeled_dataset
+        self.unlabeled_dataset = WildfireDataset(unlabeled_df, self.transform, method_name="semisupervised_cnn")
+        self.train_dataset = WildfireDataset(pd.concat([train_df, pseudolabeled_df]), self.transform)
+
+    def train(self, debug: bool=False) -> None:
+
+        for step in range(self.steps):
+
+            nb_unlabeled_data = len(self.unlabeled_dataset)
+            print(f"\n>>>>> \033[33mSTEP {step+1} - {nb_unlabeled_data} unlabeled data\033[0m")
+
+            sub_method = BasicCNN(
+                network=self.network,
+                device=self.device,
+                nb_epochs=self.nb_epochs,
+                batch_size=self.batch_size,
+                learning_rate=self.learning_rate
+            )
+
+            sub_method.process_data(
+                self.train_dataset.dataframe,
+                self.val_dataset.dataframe, 
+                self.test_dataset.dataframe,
+                use_train_data=True
+            )
+            sub_method.train(debug)
+
+            if step < self.steps-1:
+                # Useless at the last step because we don't retrain the model
+                self.update_labels(trained_network=sub_method.network)
+
+        self.network = sub_method.network
+
+    def test(self) -> None:
+
+        correct = 0
+        total = 0
+
+        print(">>> TEST")
+        testloader: DataLoader = DataLoader(self.test_dataset, batch_size=1, shuffle=False, num_workers=4)
+        
+        with torch.no_grad():
+            for data in tqdm(testloader, total=len(testloader)):
+                images, labels = data
+                images, labels = images.to(self.device), labels.to(self.device)
+
+                outputs = self.network(images)
+
+                predicted = (torch.sigmoid(outputs) > 0.5).to(torch.float32)
+                labels = labels.view_as(predicted)
+
+                total += labels.size(0)
+                correct += (predicted == labels).sum().item()
+
+        print(f'Accuracy of the network : {100 * correct / total} %')
+
+    def run(self, debug: bool=False):
+        self.train(debug)
+        self.test()
+
+    def save(self):
+        pass
+
 
 class ViT():
 

@@ -7,6 +7,7 @@ from utils import load_data
 from models import ViTEncoder, ResNetEncoder, SegFormerEncoder, resnet_classifier
 from methods import Method, BasicCNN, ViT, BasicClustering, AdvancedClustering, SemiSupervisedCNN
 
+torch.manual_seed(42)
 
 def main(args):
     method_name = args.method
@@ -18,11 +19,27 @@ def main(args):
 
     if method_name == "basic_cnn" or method_name == "all":
         classifier = resnet_classifier(num_classes=1)
-        method = BasicCNN(device=device, batch_size=32, network=classifier)
+        method = BasicCNN(
+            device=device,
+            batch_size=32,
+            network=classifier,
+            learning_rate=1e-5,
+            nb_epochs=10
+        )
         sessions.append(("basic_cnn", method))
 
     if method_name == "semisupervised_cnn" or method_name == "all":
-        method = SemiSupervisedCNN(device=device, batch_size=1)
+        # classifier = resnet_classifier(num_classes=1)
+        method = SemiSupervisedCNN(
+            network=None,
+            device=device,
+            batch_size=32,
+            confidence_rate=0.9,
+            max_pseudo_label=3000,
+            learning_rate=1e-3,
+            nb_epochs=5,
+            steps=10
+        )
         sessions.append(("semisupervised_cnn", method))
 
     if method_name == "vit" or method_name == "all":

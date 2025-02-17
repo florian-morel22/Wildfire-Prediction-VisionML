@@ -53,6 +53,8 @@ class WildfireDataset(VisionDataset):
 
         if self.method_name == "vit":
             return {"pixel_values": X, "labels": target}
+        elif self.method_name == "semisupervised_cnn":
+            return X, target, index
         else:
             return X, target
 
