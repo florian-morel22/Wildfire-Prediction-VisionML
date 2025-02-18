@@ -19,7 +19,7 @@ from sklearn.decomposition import PCA
 from torch.utils.data import DataLoader
 from sklearn.cluster import KMeans, DBSCAN
 from datasets import load_dataset, Dataset
-from sklearn.metrics import confusion_matrix
+from sklearn.metrics import confusion_matrix, davies_bouldin_score, silhouette_score
 
 from sklearn.model_selection import train_test_split
 from transformers import (
@@ -59,7 +59,7 @@ class SupervisedClassifier(Method):
 
     def __init__(
             self,
-            network: nn.Module = None,
+            classifier: nn.Module = None,
             device: str = "cpu",
             nb_epochs: int = 7,
             batch_size: int = 32,
@@ -71,17 +71,17 @@ class SupervisedClassifier(Method):
         self.batch_size = batch_size
         self.learning_rate = learning_rate
 
-        if network is None:
-            self.network = Net(num_classes=1)
+        if classifier is None:
+            self.classifier = Net(num_classes=1)
         else:
-            self.network = network
+            self.classifier = classifier
 
-        self.network = self.network.to(self.device)
-        self.optimizer = optim.Adam(self.network.parameters(), lr=self.learning_rate)
+        self.classifier = self.classifier.to(self.device)
+        self.optimizer = optim.Adam(self.classifier.parameters(), lr=self.learning_rate)
         self.scheduler = optim.lr_scheduler.ReduceLROnPlateau(self.optimizer, mode='min', factor=0.1, patience=5)
         self.criterion = nn.BCEWithLogitsLoss()
 
-        self.save_indicators = {"train":[], "test": {}, "params":{}}
+        self.metadata = {"train":[], "test": {}, "params":{}}
 
     def process_data(
             self,
@@ -118,7 +118,7 @@ class SupervisedClassifier(Method):
         for epoch in range(nb_epochs):
 
             ## TRAIN ##
-            self.network.train()
+            self.classifier.train()
             running_loss = 0.0
             pbar = tqdm(enumerate(trainloader, 0), total=len(trainloader), desc=f"train")
             for i, data in pbar:
@@ -129,7 +129,7 @@ class SupervisedClassifier(Method):
 
                 self.optimizer.zero_grad()
 
-                outputs = self.network(inputs)
+                outputs = self.classifier(inputs)
 
                 loss = self.criterion(outputs, labels.view(-1, 1))
                 loss.backward()
@@ -141,7 +141,7 @@ class SupervisedClassifier(Method):
             ## VALIDATION ##
             with torch.no_grad():
                     
-                self.network.eval()
+                self.classifier.eval()
                 val_loss = 0.0
                 correct = 0
                 total = 0
@@ -151,7 +151,7 @@ class SupervisedClassifier(Method):
                     images, labels = data
                     images, labels = images.to(self.device), labels.to(self.device)
 
-                    outputs = self.network(images)
+                    outputs = self.classifier(images)
                     loss = self.criterion(outputs, labels.view(-1, 1))
                     val_loss += loss.item()
                     
@@ -171,7 +171,7 @@ class SupervisedClassifier(Method):
 
             print(f"Epoch [{epoch+1}/{self.nb_epochs}] - Train Loss: {train_loss:.4f} | Val Loss: {val_loss:.4f} | Val Accuracy: {val_accuracy:.2f}%")
 
-            self.save_indicators['train'].append({
+            self.metadata['train'].append({
                 "epoch": epoch+1,
                 "train_loss": train_loss,
                 "val_loss": val_loss,
@@ -180,30 +180,35 @@ class SupervisedClassifier(Method):
 
     def test(self) -> None:
 
-        correct = 0
-        total = 0
-
         print(">>> TEST")
-        testloader: DataLoader = DataLoader(self.test_dataset, batch_size=1, shuffle=False, num_workers=4)
+        testloader: DataLoader = DataLoader(self.test_dataset, batch_size=self.batch_size, shuffle=False, num_workers=4)
+
+        predicted = torch.empty((0, 1))
+        ground_truth = torch.empty((0, 1))
         
         with torch.no_grad():
             for data in tqdm(testloader, total=len(testloader)):
                 images, labels = data
-                images, labels = images.to(self.device), labels.to(self.device)
+                images, labels = images.to(self.device), labels
 
-                outputs = self.network(images)
+                outputs = self.classifier(images)
 
-                predicted = (torch.sigmoid(outputs) > 0.5).to(torch.float32)
-                labels = labels.view_as(predicted)
+                predicted = torch.cat((
+                    predicted,
+                    (torch.sigmoid(outputs) > 0.5).to(torch.float32).cpu()
+                ), dim=0)
 
-                total += labels.size(0)
-                correct += (predicted == labels).sum().item()
+                ground_truth = torch.cat((
+                    ground_truth, 
+                    labels.view(-1, 1)
+                ), dim=0)
 
-        print(f'Accuracy of the network : {100 * correct / total} %')
+        acc = 100 * (predicted == ground_truth).sum() / predicted.shape[0]
+        print(f'Accuracy of the classifier : {acc.item():0.2f} %')
 
-        self.save_indicators['test'] = {
-            "accuracy": 100 * correct / total,
-            "confusion_matrix": confusion_matrix(predicted.cpu(), labels.cpu()).tolist()
+        self.metadata['test'] = {
+            "accuracy": acc.item(),
+            "confusion_matrix": confusion_matrix(predicted, ground_truth).tolist()
         }
 
     def run(
@@ -211,7 +216,7 @@ class SupervisedClassifier(Method):
             debug: bool=False
         ) -> None:
 
-        print(f">> Classifier : {type(self.network)}")
+        print(f">> Classifier : {type(self.classifier)}")
 
         self.train(debug)
         self.test()
@@ -222,16 +227,37 @@ class SupervisedClassifier(Method):
         if not os.path.exists(folder_path):
             os.makedirs(folder_path, exist_ok=True)
 
-        self.save_indicators['params'] = {
+        self.metadata['params'] = {
             "learning_rate": self.learning_rate,
             "batchsize": self.batch_size,
+            "classifier": str(type(self.classifier)),
+            "method_name": method_name
         }
 
         with open(os.path.join(folder_path, 'results.json'), 'w') as f:
-            json.dump(self.save_indicators, f)
+            json.dump(self.metadata, f)
+
+        epochs = [
+            elem["epoch"]
+            for elem in self.metadata['train']
+        ]
+        train_loss = [
+            elem["train_loss"]
+            for elem in self.metadata['train']
+        ]
+        val_loss = [
+            elem["val_loss"]
+            for elem in self.metadata['train']
+        ]
+
+        plt.figure(figsize=(9, 5))
+        plt.plot(epochs, train_loss, label="train loss")
+        plt.plot(epochs, val_loss, label="validation loss")
+        plt.legend(fontsize=12)
+        plt.title("Loss functions accross epochs")
+        plt.xlabel("epochs")
+        plt.savefig(os.path.join(folder_path, "loss.png"))
         
-
-
 class SupervisedViT(Method):
 
     def __init__(
@@ -387,17 +413,17 @@ class SemiSupervisedSelfTraining(Method):
 
     def __init__(
             self,
-            network: nn.Module = None,
+            classifier: nn.Module = None,
             device: str = "cpu",
             nb_epochs: int = 5,
             batch_size: int = 32,
-            learning_rate: float = 1e-3,
+            learning_rate: float = 1e-4,
             confidence_rate: float = 0.85,
-            max_pseudo_label: int = 500, # Maximum number of samples to pseudo label?
+            max_pseudo_label: int = 500, # Maximum number of samples to pseudo label
             steps: int = 5
             ):
         
-        self.network = network
+        self.classifier = classifier
         self.device = device
         self.nb_epochs = nb_epochs
         self.batch_size = batch_size
@@ -405,6 +431,8 @@ class SemiSupervisedSelfTraining(Method):
         self.confidence_rate = confidence_rate
         self.max_pseudo_label = max_pseudo_label
         self.steps = steps
+
+        self.metadata = {"train": {}, "test": {}, "params":{}}
 
     def process_data(
             self,
@@ -430,13 +458,13 @@ class SemiSupervisedSelfTraining(Method):
         print(f">> validation dataset : {len(self.val_dataset)} rows.")
         print(f">> test dataset : {len(self.test_dataset)} rows.\n")
 
-    def update_labels(self, trained_network: nn.Module):
+    def update_labels(self, trained_classifier: nn.Module, step: int, debug:bool):
 
         unlabeledloader = DataLoader(self.unlabeled_dataset, batch_size=self.batch_size, num_workers=4)
 
         with torch.no_grad():
                 
-            trained_network.eval()
+            trained_classifier.eval()
             results = []
 
             pbar = tqdm(enumerate(unlabeledloader, 0), total=len(unlabeledloader), desc=f"unlabeled")
@@ -445,7 +473,7 @@ class SemiSupervisedSelfTraining(Method):
                 images = images.to(torch.float32).to(self.device)
                 labels = labels.to(torch.float32).to(self.device)
 
-                outputs = trained_network(images)
+                outputs = trained_classifier(images)
                 sigm_outputs = nn.functional.sigmoid(outputs)
 
                 for idx, out in zip(indexs, sigm_outputs):
@@ -455,9 +483,9 @@ class SemiSupervisedSelfTraining(Method):
                         "confidence": abs((out - 0.5)*2).cpu().item()
                     })
 
-        results_df = pd.DataFrame(results)
-        
-        high_confident: pd.DataFrame = results_df[results_df["confidence"]> self.confidence_rate]
+        results_df = pd.DataFrame(results, columns=["index", "pseudo_label", "confidence"])
+
+        high_confident: pd.DataFrame = results_df[results_df["confidence"] > self.confidence_rate]
         
         # We want to add 50% label 0, 50% label 1
         high_confident_label0 = high_confident[high_confident["pseudo_label"]==0]
@@ -482,12 +510,17 @@ class SemiSupervisedSelfTraining(Method):
         new_labels = pseudolabeled_df["label"].value_counts()
         new_labels_0 = new_labels[0] if 0 in new_labels.index else 0
         new_labels_1 = new_labels[1] if 1 in new_labels.index else 0
-        print(f">> Newly generated 0 pseudo labels : {new_labels_0} ({new_labels_0/new_labels.sum()*100:0.2f} %)")
-        print(f">> Newly generated 1 pseudo labels : {new_labels_1} ({new_labels_1/new_labels.sum()*100:0.2f} %)")
+        print(f">> Newly generated 0 pseudo labels : {new_labels_0} ({new_labels_0/new_labels.sum()*100 if new_labels.sum()>0 else 0:0.2f} %)")
+        print(f">> Newly generated 1 pseudo labels : {new_labels_1} ({new_labels_1/new_labels.sum()*100 if new_labels.sum()>0 else 0:0.2f} %)")
 
         # Update train_dataset and unlabeled_dataset
         self.unlabeled_dataset = WildfireDataset(unlabeled_df, self.transform, method_name="ss_selftraining")
         self.train_dataset = WildfireDataset(pd.concat([train_df, pseudolabeled_df]), self.transform)
+
+        self.metadata['train'][step]["update_label"] = {
+            "new_pseudo_labels_0": int(new_labels_0),
+            "new_pseudo_labels_1": int(new_labels_1)
+        }
 
     def train(self, debug: bool=False) -> None:
 
@@ -497,7 +530,7 @@ class SemiSupervisedSelfTraining(Method):
             print(f"\n>>>>> \033[33mSTEP {step+1} - {nb_unlabeled_data} unlabeled data\033[0m")
 
             sub_method = SupervisedClassifier(
-                network=self.network,
+                classifier=self.classifier,
                 device=self.device,
                 nb_epochs=self.nb_epochs,
                 batch_size=self.batch_size,
@@ -511,42 +544,88 @@ class SemiSupervisedSelfTraining(Method):
                 use_train_data=True
             )
             sub_method.train(debug)
+            self.metadata['train'][step] = sub_method.metadata
 
             if step < self.steps-1:
                 # Useless at the last step because we don't retrain the model
-                self.update_labels(trained_network=sub_method.network)
+                self.update_labels(trained_classifier=sub_method.classifier, step=step, debug=debug)
 
-        self.network = sub_method.network
+        self.classifier = sub_method.classifier
 
     def test(self) -> None:
 
-        correct = 0
-        total = 0
-
         print(">>> TEST")
-        testloader: DataLoader = DataLoader(self.test_dataset, batch_size=1, shuffle=False, num_workers=4)
+        testloader: DataLoader = DataLoader(self.test_dataset, batch_size=self.batch_size, shuffle=False, num_workers=4)
+        
+        predicted = torch.empty((0, 1))
+        ground_truth = torch.empty((0, 1))
         
         with torch.no_grad():
             for data in tqdm(testloader, total=len(testloader)):
                 images, labels = data
-                images, labels = images.to(self.device), labels.to(self.device)
+                images, labels = images.to(self.device), labels
 
-                outputs = self.network(images)
+                outputs = self.classifier(images)
 
-                predicted = (torch.sigmoid(outputs) > 0.5).to(torch.float32)
-                labels = labels.view_as(predicted)
+                predicted = torch.cat((
+                    predicted,
+                    (torch.sigmoid(outputs) > 0.5).to(torch.float32).cpu()
+                ), dim=0)
 
-                total += labels.size(0)
-                correct += (predicted == labels).sum().item()
+                ground_truth = torch.cat((
+                    ground_truth, 
+                    labels.view(-1, 1)
+                ), dim=0)
 
-        print(f'Accuracy of the network : {100 * correct / total} %')
+        acc = 100 * (predicted == ground_truth).sum() / predicted.shape[0]
+        print(f'Accuracy of the classifier : {acc.item():0.2f} %')
+
+        self.metadata['test'] = {
+            "accuracy": acc.item(),
+            "confusion_matrix": confusion_matrix(predicted, ground_truth).tolist()
+        }
 
     def run(self, debug: bool=False):
         self.train(debug)
         self.test()
 
-    def save(self):
-        pass
+    def save(self, method_name: str, path: str="./assets/"):
+        """save the model, the loss plot..."""
+        folder_path = path + method_name
+        if not os.path.exists(folder_path):
+            os.makedirs(folder_path, exist_ok=True)
+
+        self.metadata['params'] = {
+            "learning_rate": self.learning_rate,
+            "batchsize": self.batch_size,
+            "classifier": str(type(self.classifier)),
+            "method_name": method_name
+        }
+
+        with open(os.path.join(folder_path, 'results.json'), 'w') as f:
+            json.dump(self.metadata, f)
+
+
+        nb_epochs = len(self.metadata['train'][0]['train'])
+
+        cmap = plt.get_cmap("tab20")
+        plt.figure(figsize=(9, 5))
+        for step in self.metadata['train'].keys():
+            train_loss = [
+                elem['train_loss']
+                for elem in self.metadata['train'][step]['train']
+            ]
+            val_loss = [
+                elem['val_loss']
+                for elem in self.metadata['train'][step]['train']
+            ]
+            plt.plot(range(nb_epochs), train_loss, linestyle='dashed', color=cmap(step), label=f"train loss - step {step}")
+            plt.plot(range(nb_epochs), val_loss, color=cmap(step), label=f"validation loss - step {step}")
+        
+        plt.legend(fontsize=12)
+        plt.title("Loss functions accross epochs and steps")
+        plt.xlabel("epochs")
+        plt.savefig(os.path.join(folder_path, "loss.png"))
 
 class SemiSupervisedClustering(Method):
 
@@ -564,17 +643,23 @@ class SemiSupervisedClustering(Method):
         self.device = device
         self.encoder = encoder
         self.clustering_model = None
+        self.learning_rate = learning_rate
         self.algo = algo
+        self.nb_epochs = nb_epochs
+        self.batch_size = batch_size
+        self.classifier = classifier
 
         self.sub_method = SupervisedClassifier(
-            network=classifier,
+            classifier=self.classifier,
             device=self.device,
-            nb_epochs=nb_epochs,
-            batch_size = batch_size,
-            learning_rate=learning_rate
+            nb_epochs=self.nb_epochs,
+            batch_size=self.batch_size,
+            learning_rate=self.learning_rate
         )
 
         self.kwargs = kwargs
+
+        self.metadata = {"train": {}, "test": {}, "params": {}}
 
     def process_data(
         self,
@@ -643,6 +728,14 @@ class SemiSupervisedClustering(Method):
         
         predicted_clusters = self.clustering_model.fit_predict(encoded_images)
 
+        clustering_score = davies_bouldin_score(encoded_images, predicted_clusters)
+        print("silouhettescore")
+        self.metadata["clustering"] = {
+            "davies_bouldin_score": float(clustering_score),
+            "clusters": []
+        }
+        print(f">> davies bouldin score : {clustering_score :.2f}")
+
         cluster2label = self.assign_label_to_cluster(n_clusters, true_labels, predicted_clusters)
 
         for i, (cluster, true_label) in enumerate(zip(predicted_clusters, true_labels)):
@@ -661,8 +754,8 @@ class SemiSupervisedClustering(Method):
         )
         self.sub_method.run()
 
-    def save(self):
-        pass
+        self.metadata['train'] = self.sub_method.metadata['train']
+        self.metadata['test'] = self.sub_method.metadata['test']
 
     def assign_label_to_cluster(
             self,
@@ -690,12 +783,59 @@ class SemiSupervisedClustering(Method):
 
 
                 cluster2label[cluster] = np.argmax(count_labels)
+
+                self.metadata["clustering"]["clusters"].append({
+                    "id": cluster,
+                    "label": int(np.argmax(count_labels)),
+                    "perc. of labeled data": float(nb_labeled_data/nb_data*100),
+                    "label homogeneity": float(label_homogeneity),
+                    "nb data": int(nb_data)
+                })
+
             else:
                 print(f"WARNING : cluster {cluster} has no labled data.")
                 cluster2label[cluster] = 1 # randomly assigned
         
         print("")
         return cluster2label
+
+    def save(self, method_name: str, path: str="./assets/", debug: bool=False):
+        """save the model, the loss plot..."""
+        folder_path = path + method_name + "_debug" if debug else path + method_name
+        if not os.path.exists(folder_path):
+            os.makedirs(folder_path, exist_ok=True)
+
+        self.metadata['params'] = {
+            "learning_rate": self.learning_rate,
+            "batchsize": self.batch_size,
+            "classifier": str(type(self.classifier)),
+            "method_name": method_name
+        }
+
+        with open(os.path.join(folder_path, 'results.json'), 'w') as f:
+            json.dump(self.metadata, f)
+
+        epochs = [
+            elem["epoch"]
+            for elem in self.metadata['train']
+        ]
+        train_loss = [
+            elem["train_loss"]
+            for elem in self.metadata['train']
+        ]
+        val_loss = [
+            elem["val_loss"]
+            for elem in self.metadata['train']
+        ]
+
+        plt.figure(figsize=(9, 5))
+        plt.plot(epochs, train_loss, label="train loss")
+        plt.plot(epochs, val_loss, label="validation loss")
+        plt.legend(fontsize=12)
+        plt.title("Loss functions accross epochs")
+        plt.xlabel("epochs")
+        plt.savefig(os.path.join(folder_path, "loss.png"))
+
 
 ## Unsupervised methods
 

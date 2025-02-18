@@ -1,5 +1,6 @@
 .env
 .jpg
+.json
 data
 **/images/*
 vit-fire-detection/

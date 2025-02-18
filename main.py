@@ -33,23 +33,23 @@ def get_methods(method_name: str, args) -> list[tuple[str, Method]]:
         method = SupervisedClassifier(
             device=device,
             batch_size=32,
-            network=classifier,
-            learning_rate=1e-5,
-            nb_epochs=10
+            classifier=classifier,
+            learning_rate=5*1e-5,
+            nb_epochs=7
         )
         mothods_list.append(("s_classifier_resnet", method))
 
     if method_name == "ss_selftraining_resnet" or method_name == "all":
         classifier = resnet_classifier(num_classes=1)
         method = SemiSupervisedSelfTraining(
-            network=classifier,
+            classifier=classifier,
             device=device,
             batch_size=32,
             confidence_rate=0.9,
             max_pseudo_label=3000,
-            learning_rate=1e-3,
+            learning_rate=1e-4,
             nb_epochs=5,
-            steps=5
+            steps=3
         )
         mothods_list.append(("ss_selftraining_resnet", method))
 
