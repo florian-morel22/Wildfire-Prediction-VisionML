@@ -2,7 +2,7 @@ PART=ENSTA-l40s #ENSTA-h100 #ENSTA-l40s
 TIME=00:30:00
 
 DATA_PATH="./data"
-METHOD="s_classifier_resnet"
+METHOD="ss_clustering_vit_resnet"
 
 ## Supervised Methods ##
 #s_classifier_resnet
