@@ -61,7 +61,7 @@ class Method():
         test_df: pd.DataFrame
     ):
         """
-        Define the train_dataset, valid_dataset and dataset.
+        Define the train_dataset, valid_dataset and test_dataset.
         They can be different from the original ones.
         
         Datasets are utils.WildfireDataset() instances.
@@ -82,7 +82,7 @@ class Method():
 
 In the main file, for any ```Method``` we run these three methods.
 
-If you want to run a new method, in the ```get_methods``` function in the ```main.py``` file, you have to add your new method instanciation as following :
+If you want to run a new method, you have to add your new method instanciation in the ```get_methods``` function of the ```main.py``` file, as following :
 
 
 ```python
@@ -90,5 +90,5 @@ from methods import NewMethod
 
 if method_name == "new_method" or method_name == "all":
         method = NewMethod(...)
-        mothods_list.append(("new_method", method))
+        methods_list.append(("new_method", method))
 ```
