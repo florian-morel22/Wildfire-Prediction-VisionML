@@ -104,6 +104,7 @@ class ViTEncoder(ImageEncoder):
         
         # Extract the embedding from the [CLS] token
         embedding = outputs.last_hidden_state[:, 0, :].squeeze(0).cpu().numpy()
+        print(embedding.shape)
         return embedding
 
 class SegFormerEncoder(ImageEncoder):

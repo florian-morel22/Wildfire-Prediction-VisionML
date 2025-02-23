@@ -26,7 +26,7 @@ def get_methods(method_name: str, args) -> list[tuple[str, Method]]:
 
     device = torch.device('cuda' if torch.cuda.is_available() else 'mps' if torch.mps.is_available() else 'cpu')
 
-    mothods_list = []
+    methods_list = []
 
     if method_name == "s_classifier_resnet" or method_name == "all":
         classifier = resnet_classifier(num_classes=1)
@@ -37,7 +37,7 @@ def get_methods(method_name: str, args) -> list[tuple[str, Method]]:
             learning_rate=5*1e-5,
             nb_epochs=7
         )
-        mothods_list.append(("s_classifier_resnet", method))
+        methods_list.append(("s_classifier_resnet", method))
 
     if method_name == "ss_selftraining_resnet" or method_name == "all":
         classifier = resnet_classifier(num_classes=1)
@@ -45,17 +45,17 @@ def get_methods(method_name: str, args) -> list[tuple[str, Method]]:
             classifier=classifier,
             device=device,
             batch_size=32,
-            confidence_rate=0.9,
+            confidence_rate=0.95,
             max_pseudo_label=3000,
             learning_rate=1e-4,
-            nb_epochs=5,
-            steps=3
+            nb_epochs=7,
+            steps=7
         )
-        mothods_list.append(("ss_selftraining_resnet", method))
+        methods_list.append(("ss_selftraining_resnet", method))
 
     if method_name == "s_vit" or method_name == "all":
         method = SupervisedViT(device=device, nb_epochs=50, batch_size=50, learning_rate=1e-2)
-        mothods_list.append(("s_vit", method))
+        methods_list.append(("s_vit", method))
 
     if method_name == "us_clustering_vit" or method_name == "all":
         encoder = ViTEncoder(device=device)
@@ -66,7 +66,7 @@ def get_methods(method_name: str, args) -> list[tuple[str, Method]]:
             n_clusters=args.n_clusters
         )
 
-        mothods_list.append(("us_clustering_vit", method))
+        methods_list.append(("us_clustering_vit", method))
         
     if method_name == "us_clustering_resnet_net" or method_name == "all":
         encoder = ResNetEncoder(device=device)
@@ -77,7 +77,7 @@ def get_methods(method_name: str, args) -> list[tuple[str, Method]]:
             n_cluster=args.n_clusters
         )
 
-        mothods_list.append(("us_clustering_resnet_net", method))
+        methods_list.append(("us_clustering_resnet_net", method))
     
     if method_name == "ss_clustering_vit_resnet" or method_name == "all":
         encoder = ViTEncoder(device=device)
@@ -89,22 +89,30 @@ def get_methods(method_name: str, args) -> list[tuple[str, Method]]:
             algo=args.clustering_algo,
             n_clusters=args.n_clusters,
             batch_size=32,
+            learning_rate=1e-5,
+            load_encoded_from_hf=True,
+            hf_encoded_dataset_id="florian-morel22/cvproject-vit-encoding"
         )
         
-        mothods_list.append(("ss_clustering_vit_resnet", method))
+        methods_list.append(("ss_clustering_vit_resnet", method))
 
-    if method_name == "ss_clustering_segformer_net" or method_name == "all":
+    if method_name == "ss_clustering_segformer_resnet" or method_name == "all":
         encoder = SegFormerEncoder(device=device)
+        classifier = resnet_classifier(num_classes=1)
         method = SemiSupervisedClustering(
+            classifier=classifier,
             encoder=encoder,
             device=device,
             algo=args.clustering_algo,
-            n_clusters=args.n_clusters
+            n_clusters=args.n_clusters,
+            learning_rate=1e-6,
+            load_encoded_from_hf=True,
+            hf_encoded_dataset_id="florian-morel22/cvproject-segformer-encoding"
         )
         
-        mothods_list.append(("ss_clustering_segformer_net", method))
+        methods_list.append(("ss_clustering_segformer_resnet", method))
 
-    return mothods_list
+    return methods_list
 
 def main(args):
     

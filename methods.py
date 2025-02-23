@@ -42,7 +42,11 @@ HF_TOKEN = os.environ.get("HF_TOKEN")
 class Method():
 
     @abstractmethod
-    def process_data():
+    def process_data(
+        train_df: pd.DataFrame,
+        valid_df: pd.DataFrame,
+        test_df: pd.DataFrame
+    ):
         pass
 
     @abstractmethod
@@ -50,7 +54,7 @@ class Method():
         pass
 
     @abstractmethod
-    def save():
+    def save(method_name: str, path: str):
         pass
 
 ## Supervised methods
@@ -63,7 +67,7 @@ class SupervisedClassifier(Method):
             device: str = "cpu",
             nb_epochs: int = 7,
             batch_size: int = 32,
-            learning_rate: float = 1e-3
+            learning_rate: float = 1e-4
             ):
 
         self.device = device
@@ -342,7 +346,7 @@ class SupervisedViT(Method):
             save_total_limit=1,
             remove_unused_columns=False,
             push_to_hub=False,
-            report_to=None,
+            report_to="none",
             load_best_model_at_end=True
             )
 
@@ -361,14 +365,15 @@ class SupervisedViT(Method):
         except Exception as e:
             print(f"Exception. {e}")
 
-    def save(self, save_path: str = "./vit-fire-detection"):
+    def save(self, method_name: str, path: str="./assets/"):
         """save the model, the loss plot..."""
-        print(">>> SAVING MODEL")
 
-        os.makedirs(save_path, exist_ok=True)
+        print(">>> SAVING MODEL")
+        method_path = os.path.join(path, method_name)
+        os.makedirs(method_path, exist_ok=True)
         try:
-            self.model.save_pretrained(save_path)
-            self.feature_extractor.save_pretrained(save_path)
+            self.model.save_pretrained(method_path)
+            self.feature_extractor.save_pretrained(method_path)
         except Exception as e:
             print(f"Error while saving the model: {e}")
 
@@ -528,13 +533,14 @@ class SemiSupervisedSelfTraining(Method):
 
             nb_unlabeled_data = len(self.unlabeled_dataset)
             print(f"\n>>>>> \033[33mSTEP {step+1} - {nb_unlabeled_data} unlabeled data\033[0m")
+            print(f">> learning rate : {self.learning_rate}")
 
             sub_method = SupervisedClassifier(
                 classifier=self.classifier,
                 device=self.device,
                 nb_epochs=self.nb_epochs,
                 batch_size=self.batch_size,
-                learning_rate=self.learning_rate
+                learning_rate=self.learning_rate*0.85
             )
 
             sub_method.process_data(
@@ -545,6 +551,8 @@ class SemiSupervisedSelfTraining(Method):
             )
             sub_method.train(debug)
             self.metadata['train'][step] = sub_method.metadata
+
+            self.learning_rate *= 0.55**(1/(step+1))
 
             if step < self.steps-1:
                 # Useless at the last step because we don't retrain the model
@@ -638,6 +646,8 @@ class SemiSupervisedClustering(Method):
             batch_size: int = 32,
             learning_rate: float = 0.01,
             classifier: nn.Module = None,
+            load_encoded_from_hf: bool = False, #The encoding is not run, data is fetched from Hugging Face
+            hf_encoded_dataset_id: str = None,
             **kwargs
     ):
         self.device = device
@@ -648,6 +658,11 @@ class SemiSupervisedClustering(Method):
         self.nb_epochs = nb_epochs
         self.batch_size = batch_size
         self.classifier = classifier
+        self.load_encoded_from_hf = load_encoded_from_hf
+        self.hf_encoded_dataset_id = hf_encoded_dataset_id
+
+        if self.load_encoded_from_hf:
+            assert self.hf_encoded_dataset_id, "If you want to load encoded images from huggingface, please provide a dataset id as hf_encoded_dataset_id attribute."
 
         self.sub_method = SupervisedClassifier(
             classifier=self.classifier,
@@ -684,7 +699,7 @@ class SemiSupervisedClustering(Method):
         """Load encoded images from the huggingface hub."""
         try:
             print(f">> Loading encoded images from the hub. (WARNING : ensure random state is 42 in the train_test_split() of process_data())")
-            dataset = load_dataset("florian-morel22/cvproject-vit-encoding", token=HF_TOKEN)
+            dataset = load_dataset(self.hf_encoded_dataset_id, token=HF_TOKEN)
             train_dataset: Dataset = dataset['train']
             encoded_images = np.array([train_dataset[i]['image'] for i in range(train_dataset.shape[0])])
             true_labels = np.array([train_dataset[i]['label'] for i in range(train_dataset.shape[0])])
@@ -697,17 +712,17 @@ class SemiSupervisedClustering(Method):
                 "label": true_labels
             })
             print(">> Push the encoded images dataset to the hub.")
-            dataset.push_to_hub("florian-morel22/cvproject-vit-encoding", token=HF_TOKEN, private=False)
+            dataset.push_to_hub(self.hf_encoded_dataset_id, token=HF_TOKEN, private=False)
         
         print("")
         return encoded_images, true_labels
 
-    def generate_synthetic_annotation(self, load_from_hf: bool=False):
+    def generate_synthetic_annotation(self, debug: bool):
 
-        if load_from_hf:
+        print(f">> Encoder : {type(self.encoder)}")
+        if self.load_encoded_from_hf and not debug:
             encoded_images, true_labels = self.load_data_from_hf()
         else:
-            print(f">> Encoder : {type(self.encoder)}")
             encoded_images, true_labels = self.encoder.encode_images(self.train_dataset)
 
         # Clustering_algo
@@ -744,7 +759,7 @@ class SemiSupervisedClustering(Method):
                 self.train_dataset.update_label(i, new_label)
 
     def run(self, debug: bool=False):
-        self.generate_synthetic_annotation(load_from_hf=True if not debug else False)
+        self.generate_synthetic_annotation(debug)
 
         self.sub_method.process_data(
             self.train_dataset.dataframe,
@@ -871,7 +886,7 @@ class UnsupervisedClustering(Method):
         Apply a clustering algorithm to the extracted embeddings.
         """
 
-        self.encoded_images, self.labels_true = self.encoder.encode_images(self.train_dataset)
+        self.encoded_images, self.labels_true = self.encoder.encode_images(self.test_dataset)
 
         if self.algo == "kmeans":
             n_clusters = self.kwargs.get("n_clusters", 2)
@@ -895,5 +910,5 @@ class UnsupervisedClustering(Method):
 
         print(f"Accuracy: {self.accuracy * 100:.2f}%")
 
-    def save(self):
+    def save(self, method_name: str, path: str="./assets/"):
         pass
