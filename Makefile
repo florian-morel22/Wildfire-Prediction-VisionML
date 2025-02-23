@@ -1,23 +1,9 @@
 PART=ENSTA-l40s #ENSTA-h100 #ENSTA-l40s
-TIME=00:30:00
+TIME=02:00:00
+CLUSTER = srun --pty --time=$(TIME) --partition=$(PART) --gpus=1
 
 DATA_PATH="./data"
-METHOD="ss_clustering_vit_resnet"
-
-## Supervised Methods ##
-#s_classifier_resnet
-#s_vit
-
-## Semi-Supervised Methods ##
-#ss_selftraining_resnet
-#ss_clustering_vit_resnet
-#ss_clustering_segformer_net
-
-## Unsupervised Methods ##
-#us_clustering_vit
-#us_clustering_resnet_net
-
-#all
+METHOD="ss_selftraining_resnet"
 
 N_CLUSTERS=4
 CLUSTERING_ALGO="kmeans"
@@ -26,7 +12,7 @@ PARAMS = --data_path=$(DATA_PATH)\
 	--n_clusters=$(N_CLUSTERS)\
 	--clustering_algo=$(CLUSTERING_ALGO)
 	
-NUM_SAMPLES = 500
+NUM_SAMPLES = 500 # Number of samples used in DEBUG mode.
 
 setup: download_dataset
 
@@ -46,10 +32,10 @@ download_dataset:
 	rm ./data/wildfire-prediction-dataset.zip
 
 run:
-	srun --pty --time=$(TIME) --partition=$(PART) --gpus=1 python main.py --method=$(METHOD) $(PARAMS)
+	$(CLUSTER) python main.py --method=$(METHOD) $(PARAMS)
 
 debug:
-	srun --pty --time=$(TIME) --partition=$(PART) --gpus=1 python main.py --DEBUG --method=$(METHOD) $(PARAMS) --num_samples=$(NUM_SAMPLES)
+	$(CLUSTER) python main.py --DEBUG --method=$(METHOD) $(PARAMS) --num_samples=$(NUM_SAMPLES)
 
 test:
-	srun --pty --time=$(TIME) --partition=$(PART) --gpus=1 python main.py --DEBUG --method=all $(PARAMS) --num_samples=5
+	$(CLUSTER) python main.py --DEBUG --method=all $(PARAMS) --num_samples=5
