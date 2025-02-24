@@ -2,7 +2,6 @@ import torch
 import argparse
 
 from pathlib import Path
-
 from utils import load_data 
 from models import ViTEncoder, ResNetEncoder, SegFormerEncoder, resnet_classifier
 from methods import (
@@ -34,8 +33,8 @@ def get_methods(method_name: str, args) -> list[tuple[str, Method]]:
             device=device,
             batch_size=32,
             classifier=classifier,
-            learning_rate=5*1e-5,
-            nb_epochs=7
+            learning_rate=3e-5,
+            nb_epochs=10
         )
         methods_list.append(("s_classifier_resnet", method))
 
@@ -44,17 +43,22 @@ def get_methods(method_name: str, args) -> list[tuple[str, Method]]:
         method = SemiSupervisedSelfTraining(
             classifier=classifier,
             device=device,
-            batch_size=32,
-            confidence_rate=0.95,
-            max_pseudo_label=3000,
-            learning_rate=1e-4,
+            batch_size=16,
+            confidence_rate=0.99,
+            max_pseudo_label=600,
+            learning_rate=3e-5,
             nb_epochs=7,
-            steps=7
+            steps=10
         )
         methods_list.append(("ss_selftraining_resnet", method))
 
     if method_name == "s_vit" or method_name == "all":
-        method = SupervisedViT(device=device, nb_epochs=50, batch_size=50, learning_rate=1e-2)
+        method = SupervisedViT(
+            device=device,
+            nb_epochs=1,
+            batch_size=8,
+            learning_rate=5e-5
+        )
         methods_list.append(("s_vit", method))
 
     if method_name == "us_clustering_vit" or method_name == "all":

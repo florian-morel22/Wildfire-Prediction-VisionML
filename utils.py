@@ -202,5 +202,7 @@ def compute_metrics(pred):
     labels = pred.label_ids.argmax(-1)
     preds = pred.predictions.argmax(-1)
 
+    print(preds)
+
     acc = accuracy_score(labels, preds)
     return {"accuracy": acc}

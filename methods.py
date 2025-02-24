@@ -1,36 +1,34 @@
 import os
+import copy
 import json
 import torch
 import numpy as np
 import pandas as pd
 import torch.nn as nn
 import torch.optim as optim
+import matplotlib.pyplot as plt
 
 from PIL import Image
 from tqdm import tqdm
 from abc import abstractmethod
 from dotenv import load_dotenv
 from models import ImageEncoder
-import matplotlib.pyplot as plt
 from utils import compute_metrics
 from utils import WildfireDataset
 from torchvision.transforms import v2
-from sklearn.decomposition import PCA
 from torch.utils.data import DataLoader
 from sklearn.cluster import KMeans, DBSCAN
+from torchvision.tv_tensors import Image
 from datasets import load_dataset, Dataset
-from sklearn.metrics import confusion_matrix, davies_bouldin_score, silhouette_score
-
 from sklearn.model_selection import train_test_split
+from sklearn.metrics import confusion_matrix, davies_bouldin_score, silhouette_score
 from transformers import (
-    AutoModelForImageClassification,
-    AutoFeatureExtractor
-)
-from transformers import (
+    Trainer,
     ViTImageProcessor,
-    ViTForImageClassification,
     TrainingArguments,
-    Trainer
+    AutoFeatureExtractor,
+    ViTForImageClassification,
+    AutoModelForImageClassification,
 )
 
 
@@ -47,14 +45,22 @@ class Method():
         valid_df: pd.DataFrame,
         test_df: pd.DataFrame
     ):
+        """
+        Define the train_dataset, valid_dataset and test_dataset.
+        They can be different from the original ones.
+        
+        Datasets are utils.WildfireDataset() instances.
+        """
         pass
 
     @abstractmethod
     def run(debug: bool=False):
+        """Train and Test the model."""
         pass
 
     @abstractmethod
     def save(method_name: str, path: str):
+        """Save metadata and plot usefull graphs, like loss..."""
         pass
 
 ## Supervised methods
@@ -306,9 +312,10 @@ class SupervisedViT(Method):
             ),  # Normalize with float32
         ])
 
+
         target_transform = v2.Compose([
             v2.Lambda(lambda target: torch.tensor([1., 0.]) if target == 0 else torch.tensor([0., 1.])),
-            v2.ToDtype(torch.float32, scale=True)
+            v2.ToDtype(torch.float32, scale=True),
         ])
 
         train, val = train_test_split(valid_df, train_size=0.8, random_state=42, shuffle=True)
@@ -322,9 +329,10 @@ class SupervisedViT(Method):
         print(f">> test dataset : {len(self.test_dataset)} rows.")
 
     def run(self, debug: bool=False) -> None:
-        
-        print(">>> TRAIN & TEST VIT")
+        self.train(debug)
+        self.test()        
 
+    def train(self, debug: bool=False):
         # default: adamW optimizer
         training_args = TrainingArguments(
             # use_mps_device=True,
@@ -333,7 +341,7 @@ class SupervisedViT(Method):
             per_device_eval_batch_size=self.batch_size,
             eval_strategy="epoch",
             save_strategy="epoch",
-            logging_steps=50,
+            logging_steps=10,
             num_train_epochs=self.nb_epochs if not debug else 2,
 
             learning_rate=self.learning_rate,
@@ -355,15 +363,50 @@ class SupervisedViT(Method):
             args=training_args,
             compute_metrics=compute_metrics,
             train_dataset=self.train_dataset,
-            eval_dataset=self.test_dataset,
+            eval_dataset=self.val_dataset,
             processing_class=self.feature_extractor
         )
+
         trainer.train()
-        try:
-        # Train the model
-            trainer.train()
-        except Exception as e:
-            print(f"Exception. {e}")
+        
+        self.model = trainer.model
+
+    def test(self):
+
+        print(">> TEST")
+
+        testloader: DataLoader = DataLoader(self.test_dataset, batch_size=self.batch_size, shuffle=False, num_workers=4)
+
+        predicted = torch.empty((0, 1))
+        ground_truth = torch.empty((0, 1))
+
+        self.model.eval()
+        with torch.no_grad():
+            for data in tqdm(testloader, total=len(testloader)):
+                images: Image = data["pixel_values"]
+                labels: torch.Tensor = data["labels"]
+                inputs = self.feature_extractor(images=images.clamp(0, 1), return_tensors="pt")
+                inputs = inputs.to(self.device)
+                outputs = self.model(**inputs)
+
+                logits = outputs.logits
+                probs = torch.sigmoid(logits)
+                new_predicted = probs.argmax(dim=-1).view(-1, 1)
+                new_labels = labels.argmax(dim=-1).view(-1, 1)
+
+                predicted = torch.cat((
+                    predicted,
+                    new_predicted.to(torch.int64).cpu()
+                ), dim=0)
+
+                ground_truth = torch.cat((
+                    ground_truth, 
+                    new_labels.to(torch.int64)
+                ), dim=0)
+
+        acc = 100 * (predicted == ground_truth).sum() / predicted.shape[0]
+
+        print(f'Accuracy of the classifier : {acc.item():0.2f} %')
 
     def save(self, method_name: str, path: str="./assets/"):
         """save the model, the loss plot..."""
@@ -536,11 +579,11 @@ class SemiSupervisedSelfTraining(Method):
             print(f">> learning rate : {self.learning_rate}")
 
             sub_method = SupervisedClassifier(
-                classifier=self.classifier,
+                classifier=copy.deepcopy(self.classifier),
                 device=self.device,
                 nb_epochs=self.nb_epochs,
                 batch_size=self.batch_size,
-                learning_rate=self.learning_rate*0.85
+                learning_rate=self.learning_rate
             )
 
             sub_method.process_data(
@@ -552,11 +595,14 @@ class SemiSupervisedSelfTraining(Method):
             sub_method.train(debug)
             self.metadata['train'][step] = sub_method.metadata
 
-            self.learning_rate *= 0.55**(1/(step+1))
+            # self.learning_rate *= 0.95
 
             if step < self.steps-1:
                 # Useless at the last step because we don't retrain the model
                 self.update_labels(trained_classifier=sub_method.classifier, step=step, debug=debug)
+                del sub_method
+
+
 
         self.classifier = sub_method.classifier
 
@@ -850,7 +896,6 @@ class SemiSupervisedClustering(Method):
         plt.title("Loss functions accross epochs")
         plt.xlabel("epochs")
         plt.savefig(os.path.join(folder_path, "loss.png"))
-
 
 ## Unsupervised methods
 

@@ -80,9 +80,9 @@ class Method():
 ```
 
 
-In the main file, for any ```Method``` we run these three methods.
+In the main file, for any ```Method```, these three methods are run.
 
-If you want to run a new method, you have to add your new method instanciation in the ```get_methods``` function of the ```main.py``` file, as following :
+If you want to run a new method, you have to add your new method instanciation in the ```get_methods()``` function of the ```main.py``` file, as following :
 
 
 ```python

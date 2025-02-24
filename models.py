@@ -2,12 +2,12 @@ import torch
 import numpy as np
 import torch.nn as nn
 import torch.nn.functional as F
+import torchvision.transforms as transforms
 
 from PIL import Image
 from tqdm import tqdm
 from abc import abstractmethod
 from torch.utils.data import Dataset 
-import torchvision.transforms as transforms
 from torchvision.models import resnet50, ResNet
 from transformers import ViTImageProcessor, ViTModel
 from torchvision.models import resnet50, ResNet50_Weights

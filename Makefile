@@ -3,16 +3,16 @@ TIME=02:00:00
 CLUSTER = srun --pty --time=$(TIME) --partition=$(PART) --gpus=1
 
 DATA_PATH="./data"
-METHOD="ss_selftraining_resnet"
+METHOD="s_classifier_resnet"
 
-N_CLUSTERS=4
+N_CLUSTERS=2
 CLUSTERING_ALGO="kmeans"
 
 PARAMS = --data_path=$(DATA_PATH)\
 	--n_clusters=$(N_CLUSTERS)\
 	--clustering_algo=$(CLUSTERING_ALGO)
 	
-NUM_SAMPLES = 500 # Number of samples used in DEBUG mode.
+NUM_SAMPLES = 200 # Number of samples used in DEBUG mode.
 
 setup: download_dataset
 
